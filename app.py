@@ -243,27 +243,32 @@ if btn or ticker:
                 </div>
                 """, unsafe_allow_html=True)
 
-            # --- RED 2: 10 PILLARS PRIKAZ ---
-            st.markdown("<h5 style='margin-top:5px; color:#888;'>🏛️ 10 Pillars Analysis</h5>", unsafe_allow_html=True)
+           # --- RED 2: 10 PILLARS PRIKAZ ---
+            st.markdown("<h5 style='margin-top:10px; color:#888;'>🏛️ 10 Pillars Analysis</h5>", unsafe_allow_html=True)
             cp1, cp2 = st.columns(2)
             
             def render_pillar_col(col, items):
-                html = '<div class="metric-box">'
+                html_content = '<div class="metric-box">'
                 for k in items:
-                    passed, note = pillars[k]
+                    # Dohvatimo podatke, ako nema, default je False
+                    passed, note = pillars.get(k, (False, "N/A"))
                     status_cls = "pillar-pass" if passed else "pillar-fail"
                     icon = "✅" if passed else "❌"
-                    html += f"""
+                    html_content += f"""
                     <div class="pillar-row">
-                        <span style="color:#ccc;">{k}</span>
-                        <span><span style="font-size:0.8em; color:#666; margin-right:5px;">{note}</span> <span class="{status_cls}">{icon}</span></span>
+                        <span class="pillar-label" style="color:#ccc;">{k}</span>
+                        <span>
+                            <span style="font-size:0.8em; color:#666; margin-right:5px;">{note}</span> 
+                            <span class="{status_cls}">{icon}</span>
+                        </span>
                     </div>
                     """
-                html += '</div>'
-                col.markdown(html, unsafe_allow_html=True)
+                html_content += '</div>'
+                # KLJUČNA PROMJENA: Ovdje dodajemo unsafe_allow_html=True
+                col.markdown(html_content, unsafe_allow_html=True)
 
             render_pillar_col(cp1, ['Revenue Growth', 'Net Inc Growth', 'Cash Growth', 'ROIC > 9%', 'PE < 22.5'])
-            render_pillar_col(cp2, ['Repay Debt', 'Repay Liab', 'Share Buyback', 'Div Safety', 'FCF x20'])# --- RED 3: GRAFOVI I DCF ---
+            render_pillar_col(cp2, ['Repay Debt', 'Repay Liab', 'Share Buyback', 'Div Safety', 'FCF x20'])
             tab_chart, tab_dcf = st.tabs(["📈 Financijski Grafovi", "🧮 DCF & Valuacija"])
             
             with tab_chart:
