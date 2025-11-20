@@ -12,7 +12,6 @@ st.set_page_config(page_title="Rule #1 Pro Dashboard", layout="wide")
 st.markdown("""
 <style>
     .metric-box { background-color: #1E1E1E; padding: 15px; border-radius: 8px; border: 1px solid #333; margin-bottom: 10px; font-size: 0.95rem; color: #eee; line-height: 1.6; }
-    .metric-title { font-size: 1.1rem; font-weight: bold; color: #fff; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 10px; }
     .l-green { color: #69F0AE; font-weight: bold; } 
     .d-green { color: #00C853; font-weight: bold; } 
     .yellow { color: #FFD740; font-weight: bold; }  
@@ -59,10 +58,10 @@ def calculate_rsi(data, window=14):
     return 100 - (100 / (1 + rs))
 
 @st.cache_data
-def get_data(ticker):
+def get_data_tech(ticker):
+    # Preimenovana funkcija da se izbjegne Cache Error
     stock = yf.Ticker(ticker)
-    # Dohvaćamo i povijest cijena za tehničku analizu (zadnjih 2 godine)
-    history = stock.history(period="2y")
+    history = stock.history(period="2y") # Dohvaćamo povijest cijena
     return stock.financials, stock.balance_sheet, stock.cashflow, stock.quarterly_financials, stock.quarterly_balance_sheet, stock.quarterly_cashflow, stock.info, history
 
 # --- SIDEBAR ---
@@ -75,8 +74,8 @@ with st.sidebar:
 # --- GLAVNI DIO ---
 if btn or ticker:
     with st.spinner(f'Analiziram {ticker}...'):
-        # Dohvaćamo i history sada
-        fin_y, bal_y, cf_y, fin_q, bal_q, cf_q, info, history = get_data(ticker)
+        # Dohvaćamo podatke (8 varijabli)
+        fin_y, bal_y, cf_y, fin_q, bal_q, cf_q, info, history = get_data_tech(ticker)
         
         if not fin_y.empty:
             if graph_period == "Kvartalno": fin_ch, bal_ch, cf_ch = fin_q, bal_q, cf_q
@@ -96,12 +95,11 @@ if btn or ticker:
             # METRIKE (3 Stupca)
             c1, c2, c3 = st.columns(3)
             
-            pm, om, gm = info.get('profitMargins', 0)*100, info.get('operatingMargins', 0)*100, info.get('grossMargins', 0)*100
+            pm, om = info.get('profitMargins', 0)*100, info.get('operatingMargins', 0)*100
             total_cash = info.get('totalCash', 0)
             ltd_row = 'Long Term Debt' if 'Long Term Debt' in bal.index else 'Long Term Debt And Capital Lease Obligation'
             lt_debt = bal.loc[ltd_row].iloc[0] if ltd_row in bal.index else 0
             net_cash = total_cash - lt_debt
-            dy = info.get('dividendYield', 0)*100 if info.get('dividendYield') else None
             
             with c1:
                 st.markdown(f"""<div class="metric-box"><b>Net Margin:</b> {pm:.2f}% | <b>Op:</b> {om:.2f}%<br><b>Total Cash:</b> {format_num(total_cash)}<br><b>L.T. Debt:</b> {format_num(lt_debt)}<br><b>Net Cash:</b> <span style="color:{'#4CAF50' if net_cash>0 else '#FF5252'}">{format_num(net_cash)}</span></div>""", unsafe_allow_html=True)
@@ -117,7 +115,7 @@ if btn or ticker:
             with c3:
                 st.markdown(f"""<div class="metric-box"><b>Mkt Cap:</b> {format_num(mkt_cap)}<br><b>EPS:</b> ${eps}<br><b>P/E:</b> {pe if pe else '-'}</div>""", unsafe_allow_html=True)
 
-            # --- 10 PILLARS ---
+            # 10 PILLARS
             st.subheader("🏛️ 10 Pillars Analiza")
             pillars = {}
             try: pillars['Revenue Growth'] = (((fin.iloc[0,0]-fin.iloc[0,-1])/fin.iloc[0,-1]) > 0, "")
@@ -166,10 +164,10 @@ if btn or ticker:
 
             st.markdown("---")
 
-            # --- TABS (DODAN NOVI TAB ZA TEHNIČKU ANALIZU) ---
+            # --- TABS (GRAFOVI, TECH, DCF) ---
             tab_fund, tab_tech, tab_dcf = st.tabs(["📈 Financijski Grafovi", "📉 Tehnička Analiza", "🧮 DCF & Valuacija"])
 
-            # TAB 1: FUNDAMENTALNI GRAFOVI
+            # TAB 1: FUNDAMENTI
             with tab_fund:
                 dates = fin_ch.columns[::-1]
                 d_str = [str(d).split(' ')[0] for d in dates]
@@ -183,7 +181,6 @@ if btn or ticker:
                     st.plotly_chart(fig, use_container_width=True)
                 
                 with cg2:
-                    # Cash vs LT Debt
                     try:
                         c_row_ch = 'Cash And Cash Equivalents' if 'Cash And Cash Equivalents' in bal_ch.index else 'Cash Cash Equivalents And Short Term Investments'
                         cd = bal_ch.loc[c_row_ch][dates]
@@ -193,42 +190,33 @@ if btn or ticker:
                         fig2.add_trace(go.Bar(x=d_str, y=ld, name="L.T. Debt", marker_color='#FF5252'))
                         fig2.update_layout(title="Cash vs LT Debt", template="plotly_white", barmode='group', height=350)
                         st.plotly_chart(fig2, use_container_width=True)
-                    except: st.info("Nema Cash podataka.")
+                    except: st.info("Nema Cash podataka za graf.")
 
-            # TAB 2: TEHNIČKA ANALIZA (NOVO!)
+            # TAB 2: TEHNIČKA ANALIZA
             with tab_tech:
-                st.subheader("Tehnička Analiza (Zadnjih 12 mj)")
+                st.subheader("Tehnička Analiza (Zadnjih 2 god)")
                 if not history.empty:
-                    # Izračun indikatora
+                    # Kalkulacije
                     history['SMA_50'] = history['Close'].rolling(window=50).mean()
                     history['SMA_200'] = history['Close'].rolling(window=200).mean()
                     history['RSI'] = calculate_rsi(history['Close'])
                     
-                    # Graf 1: Candlestick + SMA
+                    # Graf Cijene
                     fig_tech = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
                     
-                    # Cijena (Candlestick)
-                    fig_tech.add_trace(go.Candlestick(x=history.index,
-                                    open=history['Open'], high=history['High'],
-                                    low=history['Low'], close=history['Close'], name='Cijena'), row=1, col=1)
-                    
-                    # SMA Linije
+                    fig_tech.add_trace(go.Candlestick(x=history.index, open=history['Open'], high=history['High'], low=history['Low'], close=history['Close'], name='Cijena'), row=1, col=1)
                     fig_tech.add_trace(go.Scatter(x=history.index, y=history['SMA_50'], line=dict(color='blue', width=1.5), name='SMA 50'), row=1, col=1)
                     fig_tech.add_trace(go.Scatter(x=history.index, y=history['SMA_200'], line=dict(color='red', width=1.5), name='SMA 200'), row=1, col=1)
                     
-                    # Graf 2: RSI
+                    # Graf RSI
                     fig_tech.add_trace(go.Scatter(x=history.index, y=history['RSI'], line=dict(color='purple', width=1.5), name='RSI'), row=2, col=1)
-                    
-                    # RSI Linije (30 i 70)
                     fig_tech.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
                     fig_tech.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
                     
-                    fig_tech.update_layout(xaxis_rangeslider_visible=False, height=500, template="plotly_dark")
+                    fig_tech.update_layout(xaxis_rangeslider_visible=False, height=550, template="plotly_dark")
                     st.plotly_chart(fig_tech, use_container_width=True)
-                    
-                    st.info("💡 **Savjet:** Kupuj kada je cijena iznad SMA 200 (Crvena), a RSI padne blizu 30 (Preprodano).")
                 else:
-                    st.warning("Nema povijesnih podataka o cijeni.")
+                    st.warning("Nema povijesnih podataka za tehničku analizu.")
 
             # TAB 3: MAGIC FORMULA
             with tab_dcf:
