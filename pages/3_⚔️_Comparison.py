@@ -5,29 +5,10 @@ import pandas as pd
 st.set_page_config(page_title="Usporedba Dionica", layout="wide")
 
 st.title("⚔️ Usporedba Konkurencije")
-st.markdown("Tablica usporedbe prema ključnim financijskim pokazateljima.")
-
-# --- POMOĆNE FUNKCIJE ZA FORMATIRANJE ---
-def fmt_num(val):
-    """Zaokružuje na 2 decimale, vraća '-' ako nema podataka"""
-    if val is None: return "-"
-    return f"{val:.2f}"
-
-def fmt_pct(val):
-    """Pretvara decimalni broj (0.05) u postotak (5.00%), vraća '-' ako nema podataka"""
-    if val is None: return "-"
-    return f"{val * 100:.2f}%"
-
-def fmt_large(num):
-    """Formatira velike brojeve (B/T)"""
-    if num is None: return "-"
-    if abs(num) >= 1_000_000_000_000: return f"{num / 1_000_000_000_000:.2f}T"
-    if abs(num) >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
-    elif abs(num) >= 1_000_000: return f"{num / 1_000_000:.2f}M"
-    else: return f"{num:.2f}"
+st.markdown("Tablica s označenim financijskim zdravljem (Boje prema Rule #1 kriterijima).")
 
 # --- INPUT ---
-tickers_input = st.text_input("Upiši simbole za usporedbu (odvojene zarezom):", "CRM, MSFT, ORCL, ADBE, SAP, NOW, SNOW")
+tickers_input = st.text_input("Upiši simbole za usporedbu (odvojene zarezom):", "CRM, MSFT, ORCL, ADBE, SAP, NOW")
 
 if st.button("🚀 Usporedi", type="primary"):
     tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip()]
@@ -43,68 +24,104 @@ if st.button("🚀 Usporedi", type="primary"):
                 stock = yf.Ticker(t)
                 info = stock.info
                 
-                # Provjera dividende (ako je None, probaj drugu varijablu)
-                div_yield = info.get('dividendYield')
-                if div_yield is None:
-                     # Ponekad je u trailingAnnualDividendYield
-                     div_yield = info.get('trailingAnnualDividendYield')
-
-                # Debt to Equity u YF je često u postotcima (npr. 80 za 0.8). 
-                # Dijelimo sa 100 da dobijemo ratio kao na slici.
+                # Priprema podataka (Čuvamo ih kao BROJEVE radi bojanja)
+                
+                # Debt to Equity (Yahoo daje u postotku, npr. 150, dijelimo sa 100)
                 de_ratio = info.get('debtToEquity')
-                if de_ratio is not None:
-                    de_ratio = de_ratio / 100
+                if de_ratio is not None: de_ratio = de_ratio / 100
+                
+                # Dividenda
+                div_yield = info.get('dividendYield')
+                if div_yield is None: div_yield = info.get('trailingAnnualDividendYield')
+                if div_yield is not None: div_yield = div_yield * 100 # U postotak
 
-                # Priprema reda (Točno stupci sa slike)
                 row = {
                     "Ticker": t,
-                    "Market Cap": fmt_large(info.get('marketCap')),
-                    "P/E": fmt_num(info.get('trailingPE')),
-                    "P/B": fmt_num(info.get('priceToBook')),
-                    "P/S": fmt_num(info.get('priceToSalesTrailing12Months')),
-                    "PEG": fmt_num(info.get('pegRatio')),
-                    "Debt/Eq": fmt_num(de_ratio),
-                    "Quick": fmt_num(info.get('quickRatio')),
-                    "Current": fmt_num(info.get('currentRatio')),
-                    "ROE": fmt_pct(info.get('returnOnEquity')),
-                    "ROA": fmt_pct(info.get('returnOnAssets')),
-                    "Gross M": fmt_pct(info.get('grossMargins')),
-                    "Oper M": fmt_pct(info.get('operatingMargins')),
-                    "Profit M": fmt_pct(info.get('profitMargins')),
-                    "Div Yield": fmt_pct(div_yield),
-                    "Payout": fmt_pct(info.get('payoutRatio')),
+                    "Market Cap": info.get('marketCap'),
+                    "P/E": info.get('trailingPE'),
+                    "P/B": info.get('priceToBook'),
+                    "P/S": info.get('priceToSalesTrailing12Months'),
+                    "PEG": info.get('pegRatio'),
+                    
+                    # Stupci za bojanje (Zdravlje)
+                    "Debt/Eq": de_ratio,
+                    "Quick": info.get('quickRatio'),
+                    "Current": info.get('currentRatio'),
+                    "ROE": info.get('returnOnEquity') * 100 if info.get('returnOnEquity') else None,
+                    "ROA": info.get('returnOnAssets') * 100 if info.get('returnOnAssets') else None,
+                    
+                    # Margine
+                    "Gross M": info.get('grossMargins') * 100 if info.get('grossMargins') else None,
+                    "Oper M": info.get('operatingMargins') * 100 if info.get('operatingMargins') else None,
+                    "Profit M": info.get('profitMargins') * 100 if info.get('profitMargins') else None,
+                    
+                    # Ostalo
+                    "Div Yield": div_yield,
+                    "Payout": info.get('payoutRatio') * 100 if info.get('payoutRatio') else None,
                     "An. Rec": info.get('recommendationKey', '-').replace('_', ' ').title()
                 }
                 data.append(row)
             except:
-                pass # Preskoči ako greška
+                pass 
             
             progress_bar.progress((i + 1) / len(tickers))
         
         progress_bar.empty()
         
         if data:
-            # Kreiranje tablice
             df = pd.DataFrame(data)
             
-            # Prikaz tablice
-            st.success(f"Uspoređeno {len(df)} kompanija.")
-            st.dataframe(
-                df,
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "Ticker": st.column_config.TextColumn("Ticker", width="small", help="Simbol dionice"),
-                    "Market Cap": st.column_config.TextColumn("Mkt Cap", width="medium"),
-                    "An. Rec": st.column_config.TextColumn("Analyst Rec", width="medium"),
-                }
-            )
+            # --- DEFINIRANJE BOJA (STYLING) ---
+            def color_liquidity(val): # Quick, Current
+                if pd.isna(val): return None
+                if val > 1.2: return 'color: #4CAF50; font-weight: bold' # Green
+                elif val >= 0.9: return 'color: #FFC107; font-weight: bold' # Yellow
+                return 'color: #FF5252; font-weight: bold' # Red
+
+            def color_debt(val): # Debt/Eq
+                if pd.isna(val): return None
+                if val < 1: return 'color: #4CAF50; font-weight: bold'
+                elif val <= 2: return 'color: #FFC107; font-weight: bold'
+                return 'color: #FF5252; font-weight: bold'
+
+            def color_returns(val): # ROE, ROA
+                if pd.isna(val): return None
+                if val >= 12: return 'color: #00C853; font-weight: bold' # Dark Green
+                elif val >= 9: return 'color: #69F0AE; font-weight: bold' # Light Green
+                elif val >= 6: return 'color: #FFC107; font-weight: bold' # Yellow
+                return 'color: #FF5252; font-weight: bold' # Red
             
-            # Kratka legenda ispod
+            # --- PRIMJENA STILOVA ---
+            # Koristimo Pandas Styler
+            styler = df.style.format({
+                "Market Cap": lambda x: f"{x/1e9:.2f}B" if pd.notnull(x) else "-",
+                "P/E": "{:.2f}", "P/B": "{:.2f}", "P/S": "{:.2f}", "PEG": "{:.2f}",
+                "Debt/Eq": "{:.2f}", "Quick": "{:.2f}", "Current": "{:.2f}",
+                "ROE": "{:.2f}%", "ROA": "{:.2f}%", 
+                "Gross M": "{:.2f}%", "Oper M": "{:.2f}%", "Profit M": "{:.2f}%",
+                "Div Yield": "{:.2f}%", "Payout": "{:.2f}%"
+            }, na_rep="-")
+            
+            # Bojanje specifičnih stupaca (koristimo map umjesto applymap za novije verzije, ali applymap je sigurniji za starije)
+            # Streamlit koristi novije verzije, 'map' je standard.
+            try:
+                styler.map(color_liquidity, subset=["Quick", "Current"])
+                styler.map(color_debt, subset=["Debt/Eq"])
+                styler.map(color_returns, subset=["ROE", "ROA"])
+            except:
+                # Fallback za starije verzije pandasa
+                styler.applymap(color_liquidity, subset=["Quick", "Current"])
+                styler.applymap(color_debt, subset=["Debt/Eq"])
+                styler.applymap(color_returns, subset=["ROE", "ROA"])
+
+            # Prikaz tablice
+            st.dataframe(styler, use_container_width=True, hide_index=True)
+            
+            # Legenda
             st.caption("""
-            **Legenda:** **P/E**: Price to Earnings, **P/B**: Price to Book, **P/S**: Price to Sales, **PEG**: PE to Growth.
-            **Debt/Eq**: Debt to Equity Ratio. **ROE**: Return on Equity. **ROA**: Return on Assets.
-            **Oper M**: Operating Margin. **An. Rec**: Preporuka analitičara (Buy, Hold, Sell).
+            **Legenda Boja:** 🟢 **Zeleno:** Odlično (Liquid > 1.2, Debt < 1, ROE > 9%) 
+            🟡 **Žuto:** Srednje 
+            🔴 **Crveno:** Oprez
             """)
             
         else:
