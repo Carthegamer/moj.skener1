@@ -6,13 +6,60 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- KONFIGURACIJA STRANICE ---
-st.set_page_config(page_title="Rule #1 Skener 2.0", layout="wide")
+st.set_page_config(page_title="Rule #1 Dashboard", layout="wide")
+
+# --- CSS STILOVI (Za boje u tablicama) ---
+st.markdown("""
+<style>
+    .metric-card {
+        background-color: #1E1E1E;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+    }
+    .val-dark-green { color: #006400; font-weight: bold; }
+    .val-green { color: #4CAF50; font-weight: bold; }
+    .val-yellow { color: #FFC107; font-weight: bold; }
+    .val-red { color: #FF5252; font-weight: bold; }
+    .metric-label { font-size: 0.8rem; color: #aaa; }
+    .metric-value { font-size: 1.1rem; font-weight: bold; color: #fff; }
+</style>
+""", unsafe_allow_html=True)
 
 # --- FUNKCIJE ---
 def format_num(num):
+    if num is None: return "-"
+    if abs(num) >= 1_000_000_000_000: return f"{num / 1_000_000_000_000:.2f}T"
     if abs(num) >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
     elif abs(num) >= 1_000_000: return f"{num / 1_000_000:.2f}M"
     else: return f"{num:.2f}"
+
+def get_color_html(value, type_rule):
+    """Funkcija koja određuje boju na temelju tvojih pravila"""
+    if value is None: return "white"
+    
+    if type_rule == "ratio_liquidity": # Quick/Current Ratio (>1.2 G, 0.9-1.2 Y, <0.9 R)
+        if value > 1.2: return "#4CAF50" # Green
+        elif value >= 0.9: return "#FFC107" # Yellow
+        else: return "#FF5252" # Red
+        
+    elif type_rule == "debt_equity": # Debt/Eq (<1 G, 1-2 Y, >2 R)
+        if value < 1: return "#4CAF50"
+        elif value <= 2: return "#FFC107"
+        else: return "#FF5252"
+        
+    elif type_rule == "returns": # ROA, ROE, ROIC (>12 DG, 9-12 G, 6-9 Y, <6 R)
+        if value > 12: return "#2E7D32" # Dark Green
+        elif value > 9: return "#4CAF50" # Light Green
+        elif value > 6: return "#FFC107" # Yellow
+        else: return "#FF5252" # Red
+        
+    elif type_rule == "interest_cov": # >1.5 G, 1.15-1.5 Y, <1.15 R
+        if value > 1.5: return "#4CAF50"
+        elif value >= 1.15: return "#FFC107"
+        else: return "#FF5252"
+    
+    return "white"
 
 @st.cache_data
 def get_data(ticker):
@@ -25,7 +72,7 @@ def analyze_stock(ticker):
     if fin.empty: return None
 
     results = {}
-    score = 0 # Ovdje brojimo bodove (0 do 10)
+    score = 0 
     
     years_count = min(5, len(fin.columns))
     current_idx = 0
@@ -71,7 +118,7 @@ def analyze_stock(ticker):
         if passed: score += 1
     except: results['Repay Debt'] = (False, "N/A")
     
-    # 5. REPAY LIABILITIES (Avg Non-Current)
+    # 5. REPAY LIABILITIES
     try:
         liab_row = 'Total Non Current Liabilities Net Minority Interest' if 'Total Non Current Liabilities Net Minority Interest' in bal.index else 'Total Non Current Liabilities'
         if liab_row in bal.index:
@@ -113,11 +160,9 @@ def analyze_stock(ticker):
     # 8. SHARE BUYBACK
     try:
         shares_now = info.get('sharesOutstanding', 0)
-        # Fallback na balancu ako info fali
         if shares_now == 0 and 'Ordinary Shares Number' in bal.index:
             shares_now = bal.loc['Ordinary Shares Number'].iloc[current_idx]
-            
-        shares_old = shares_now # default
+        shares_old = shares_now 
         if 'Ordinary Shares Number' in bal.index:
             shares_old = bal.loc['Ordinary Shares Number'].iloc[old_idx]
             
@@ -148,54 +193,137 @@ def analyze_stock(ticker):
         div_paid = abs(cf.loc['Cash Dividends Paid'].iloc[current_idx]) if 'Cash Dividends Paid' in cf.index else 0
         cash = bal.loc[cash_row].iloc[current_idx]
         if div_paid == 0:
-            passed = True # Nema dividende = sigurno (neutralno)
+            passed = True 
             msg = "Nema dividende"
         else:
             passed = cash > div_paid
             msg = f"Cash > Div ({format_num(div_paid)})"
-        
         results['Dividend Safety'] = (passed, msg)
         if passed: score += 1
     except: results['Dividend Safety'] = (False, "N/A")
 
-    return results, score, fin, bal, info
+    return results, score, fin, bal, info, avg_roic
 
 # --- HEADER ---
-st.title("🚀 Rule #1 Skener 2.0")
-st.markdown("Napredna analiza dionica s automatskim bodovanjem")
+st.title("🚀 Rule #1 Dashboard")
+st.markdown("Profesionalni alat za analizu dionica")
 
-# --- SIDEBAR INPUT ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("Pretraga")
     ticker = st.text_input("Simbol:", "CRM").upper()
     btn = st.button("Skeniraj Dionicu", type="primary")
-    st.markdown("---")
-    st.markdown("💡 **Savjet:** Upiši US simbole (CRM, AAPL, TSLA, GOOGL).")
 
 # --- GLAVNI DIO ---
 if btn or ticker:
-    with st.spinner(f'Analiziram {ticker}...'):
+    with st.spinner(f'Dohvaćam podatke za {ticker}...'):
         data = analyze_stock(ticker)
         
         if data:
-            results, score, fin, bal, info = data
+            results, score, fin, bal, info, avg_roic = data
             
+            # --- DATA PREPARATION FOR HEADER ---
+            # Col 1: Margins & Cash
+            p_margin = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
+            o_margin = info.get('operatingMargins', 0) * 100 if info.get('operatingMargins') else 0
+            g_margin = info.get('grossMargins', 0) * 100 if info.get('grossMargins') else 0
+            total_cash = info.get('totalCash', 0)
+            total_debt = info.get('totalDebt', 0)
+            net_cash = total_cash - total_debt
+            div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else None
+            payout = info.get('payoutRatio', 0) * 100 if info.get('payoutRatio') else None
+
+            # Col 2: Ratios (Colors)
+            quick_r = info.get('quickRatio', 0)
+            curr_r = info.get('currentRatio', 0)
+            debt_eq = info.get('debtToEquity', 0) / 100 if info.get('debtToEquity') else 0 # YF gives % often
+            roa = info.get('returnOnAssets', 0) * 100 if info.get('returnOnAssets') else 0
+            roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
+            # Interest Cov calc
+            try:
+                ebit = fin.loc['EBIT'].iloc[0] if 'EBIT' in fin.index else fin.loc['Pretax Income'].iloc[0]
+                int_exp = abs(fin.loc['Interest Expense'].iloc[0]) if 'Interest Expense' in fin.index else 1
+                int_cov = ebit / int_exp if int_exp > 0 else 0
+            except: int_cov = 0
+
+            # Col 3: Valuation
+            mkt_cap = info.get('marketCap', 0)
+            eps = info.get('trailingEps', 0)
+            pe_ttm = info.get('trailingPE', 0)
+            pe_fwd = info.get('forwardPE', 0)
+            ps = info.get('priceToSalesTrailing12Months', 0)
+            pb = info.get('priceToBook', 0)
+            bvps = info.get('bookValue', 0)
+
+            # --- RENDER HEADER COLUMNS ---
+            st.markdown("---")
+            col_left, col_mid, col_right = st.columns(3)
+
+            # 1. COLUMN (Lijevo - Margine, Cash, Dividende)
+            with col_left:
+                st.subheader("💵 Margine & Cash")
+                st.markdown(f"""
+                <div style="line-height: 1.8;">
+                    <b>Gross Margin:</b> {g_margin:.2f}%<br>
+                    <b>Operating Margin:</b> {o_margin:.2f}%<br>
+                    <b>Net Margin:</b> {p_margin:.2f}%<br>
+                    <hr style="margin: 5px 0;">
+                    <b>Total Cash:</b> {format_num(total_cash)}<br>
+                    <b>Total Debt:</b> {format_num(total_debt)}<br>
+                    <b>Net Cash:</b> <span style="color: {'#4CAF50' if net_cash>0 else '#FF5252'}">{format_num(net_cash)}</span><br>
+                    <hr style="margin: 5px 0;">
+                    <b>Dividend Yield:</b> {f"{div_yield:.2f}%" if div_yield else "-"}<br>
+                    <b>Payout Ratio:</b> {f"{payout:.2f}%" if payout else "-"}
+                </div>
+                """, unsafe_allow_html=True)
+
+            # 2. COLUMN (Sredina - Ratios sa BOJAMA)
+            with col_mid:
+                st.subheader("🛡️ Financijsko Zdravlje")
+                st.markdown(f"""
+                <div style="line-height: 1.8; font-weight: 500;">
+                    Quick Ratio: <span style="color:{get_color_html(quick_r, 'ratio_liquidity')}">{quick_r:.2f}</span><br>
+                    Current Ratio: <span style="color:{get_color_html(curr_r, 'ratio_liquidity')}">{curr_r:.2f}</span><br>
+                    Debt / Equity: <span style="color:{get_color_html(debt_eq, 'debt_equity')}">{debt_eq:.2f}</span><br>
+                    <hr style="margin: 5px 0;">
+                    ROA: <span style="color:{get_color_html(roa, 'returns')}">{roa:.2f}%</span><br>
+                    ROE: <span style="color:{get_color_html(roe, 'returns')}">{roe:.2f}%</span><br>
+                    ROIC (Avg 5y): <span style="color:{get_color_html(avg_roic, 'returns')}">{avg_roic:.2f}%</span><br>
+                    Interest Cov: <span style="color:{get_color_html(int_cov, 'interest_cov')}">{int_cov:.2f}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # 3. COLUMN (Desno - Osnovne Valuacije)
+            with col_right:
+                st.subheader("🏷️ Valuacija")
+                st.markdown(f"""
+                <div style="line-height: 1.8;">
+                    <b>Market Cap:</b> {format_num(mkt_cap)}<br>
+                    <b>Current EPS:</b> ${eps}<br>
+                    <hr style="margin: 5px 0;">
+                    <b>P/E (TTM):</b> {pe_ttm if pe_ttm else '-'}<br>
+                    <b>P/E (Fwd):</b> {pe_fwd if pe_fwd else '-'}<br>
+                    <b>Price / Sales:</b> {ps if ps else '-'}<br>
+                    <b>Price / Book:</b> {pb if pb else '-'}<br>
+                    <b>Book Val/Share:</b> ${bvps}
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+
             # SCORE CARD
             curr_price = info.get('currentPrice', 'N/A')
-            
-            col_score1, col_score2, col_score3 = st.columns([1,2,1])
-            with col_score2:
-                st.markdown(f"<h1 style='text-align: center; color: #4CAF50;'>SCORE: {score}/10</h1>", unsafe_allow_html=True)
-                st.markdown(f"<h3 style='text-align: center;'>Cijena: ${curr_price}</h3>", unsafe_allow_html=True)
+            c1, c2, c3 = st.columns([1,2,1])
+            with c2:
+                st.markdown(f"<h1 style='text-align: center; color: #4CAF50; margin-bottom:0;'>SCORE: {score}/10</h1>", unsafe_allow_html=True)
+                st.markdown(f"<h3 style='text-align: center; margin-top:0;'>Cijena: ${curr_price}</h3>", unsafe_allow_html=True)
 
             # TABS
-            tab1, tab2, tab3 = st.tabs(["📊 10 Pillars Analiza", "📈 Interaktivni Grafovi", "📄 Izvještaji"])
+            tab1, tab2, tab3 = st.tabs(["📊 10 Pillars Detaljno", "📈 Grafovi", "📄 Izvještaji"])
 
             # TAB 1: PILLARS
             with tab1:
-                c1, c2 = st.columns(2)
-                
-                # Helper za prikaz
+                c_left, c_right = st.columns(2)
                 def show_res(container, key, label):
                     passed, val = results[key]
                     icon = "✅" if passed else "❌"
@@ -203,7 +331,7 @@ if btn or ticker:
                     container.caption(val)
                     container.markdown("---")
 
-                with c1:
+                with c_left:
                     st.subheader("Rast & Profitabilnost")
                     show_res(st, 'Revenue Growth', '1. Revenue Growth (5y)')
                     show_res(st, 'Net Income Growth', '2. Net Income Growth (5y)')
@@ -211,7 +339,7 @@ if btn or ticker:
                     show_res(st, 'ROIC > 9%', '7. ROIC > 9% (Avg)')
                     show_res(st, 'PE Ratio', '6. PE Ratio (< 22.5)')
 
-                with c2:
+                with c_right:
                     st.subheader("Bilanca & Vrednovanje")
                     show_res(st, 'Repay Debt', '4. Can Repay Net Debt')
                     show_res(st, 'Repay Liabilities', '5. Can Repay Liabilities')
@@ -219,53 +347,31 @@ if btn or ticker:
                     show_res(st, 'Dividend Safety', '10. Dividend Safety')
                     show_res(st, 'Undervalued (FCFx20)', '9. Valuation (FCF * 20)')
 
-            # TAB 2: GRAFOVI (PLOTLY)
+            # TAB 2: GRAFOVI
             with tab2:
-                years = fin.columns[::-1] # Od najstarije
+                years = fin.columns[::-1]
                 
-                # GRAF 1: Revenue vs Net Income
+                # GRAF 1
                 fig1 = make_subplots(specs=[[{"secondary_y": True}]])
-                fig1.add_trace(go.Bar(x=years, y=fin.loc['Total Revenue'][years], name="Revenue", marker_color='blue'), secondary_y=False)
-                fig1.add_trace(go.Scatter(x=years, y=fin.loc['Net Income'][years], name="Net Income", line=dict(color='green', width=3)), secondary_y=True)
-                fig1.update_layout(title_text="Rast Prihoda (Stupci) i Dobiti (Linija)")
+                fig1.add_trace(go.Bar(x=years, y=fin.loc['Total Revenue'][years], name="Revenue", marker_color='#3f51b5'), secondary_y=False)
+                fig1.add_trace(go.Scatter(x=years, y=fin.loc['Net Income'][years], name="Net Income", line=dict(color='#4CAF50', width=3)), secondary_y=True)
+                fig1.update_layout(title_text="Rast Prihoda i Dobiti", template="plotly_dark")
                 st.plotly_chart(fig1, use_container_width=True)
 
-                # GRAF 2: Cash vs Debt
+                # GRAF 2
                 if 'Total Debt' in bal.index:
                     cash_row = 'Cash And Cash Equivalents' if 'Cash And Cash Equivalents' in bal.index else 'Cash Cash Equivalents And Short Term Investments'
                     fig2 = go.Figure()
-                    fig2.add_trace(go.Bar(x=years, y=bal.loc[cash_row][years], name='Cash', marker_color='green'))
-                    fig2.add_trace(go.Bar(x=years, y=bal.loc['Total Debt'][years], name='Debt', marker_color='red'))
-                    fig2.update_layout(title_text="Financijska Snaga: Keš vs Dug", barmode='group')
+                    fig2.add_trace(go.Bar(x=years, y=bal.loc[cash_row][years], name='Cash', marker_color='#4CAF50'))
+                    fig2.add_trace(go.Bar(x=years, y=bal.loc['Total Debt'][years], name='Debt', marker_color='#FF5252'))
+                    fig2.update_layout(title_text="Keš vs Dug", barmode='group', template="plotly_dark")
                     st.plotly_chart(fig2, use_container_width=True)
-
-                # GRAF 3: VALUATION GAUGE
-                # Pojednostavljena vizualizacija trenutnog PE
-                pe = info.get('trailingPE', 0)
-                fig3 = go.Figure(go.Indicator(
-                    mode = "gauge+number",
-                    value = pe,
-                    title = {'text': "P/E Ratio (Manje je bolje)"},
-                    gauge = {
-                        'axis': {'range': [0, 50]},
-                        'bar': {'color': "black"},
-                        'steps': [
-                            {'range': [0, 15], 'color': "lightgreen"},
-                            {'range': [15, 25], 'color': "yellow"},
-                            {'range': [25, 50], 'color': "red"}],
-                        'threshold': {
-                            'line': {'color': "blue", 'width': 4},
-                            'thickness': 0.75,
-                            'value': 22.5}}))
-                st.plotly_chart(fig3, use_container_width=True)
 
             # TAB 3: IZVJEŠTAJI
             with tab3:
-                st.write("Ovdje su sirovi podaci ako želiš dublje kopati:")
-                with st.expander("Prikaži Income Statement"):
-                    st.dataframe(fin)
-                with st.expander("Prikaži Balance Sheet"):
-                    st.dataframe(bal)
+                st.write("Izvorni podaci:")
+                with st.expander("Income Statement"): st.dataframe(fin)
+                with st.expander("Balance Sheet"): st.dataframe(bal)
 
         else:
-            st.error("Podaci nisu pronađeni. Provjeri simbol ili pokušaj kasnije.")
+            st.error("Nema podataka. Provjeri simbol.")
