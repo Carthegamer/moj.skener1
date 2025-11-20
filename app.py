@@ -306,29 +306,83 @@ if btn or ticker:
                     with cg4: plot_bar("Shares Outstanding", sh, '#FF9800')
                 except: pass
                 
-                # Red grafova 3 (Cash vs Debt)
-                try:
-                    c_row_ch = 'Cash And Cash Equivalents' if 'Cash And Cash Equivalents' in bal_ch.index else 'Cash Cash Equivalents And Short Term Investments'
-                    cd = bal_ch.loc[c_row_ch][dates]
-                    ld = bal_ch.loc[ltd_row][dates] if ltd_row in bal_ch.index else [0]*len(dates)
-                    plot_bar("Cash vs LT Debt", cd, '#4CAF50', ld, '#FF5252', 'L.T. Debt')
-                except: pass
+               # --- RED 3: GRAFOVI I DCF ---
+            st.markdown("---") # Razmak
+            tab_chart, tab_dcf = st.tabs(["📈 Financijski Grafovi", "🧮 DCF & Valuacija"])
+            
+            with tab_chart:
+                st.caption(f"Prikaz podataka: {chart_title}")
+                # Osiguravamo da imamo podatke
+                if not fin_ch.empty:
+                    dates = fin_ch.columns[::-1]
+                    d_str = [str(d).split(' ')[0] for d in dates]
+
+                    def plot_bar(title, y, col, y2=None, col2=None, name2=None):
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(x=d_str, y=y, name=title, marker_color=col))
+                        if y2 is not None: 
+                            fig.add_trace(go.Bar(x=d_str, y=y2, name=name2, marker_color=col2))
+                        
+                        fig.update_layout(
+                            title=title, 
+                            height=300, 
+                            margin=dict(l=10,r=10,t=30,b=10), 
+                            template="plotly_white",
+                            barmode='group'
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    # Graf 1: Rev & Net Inc
+                    c_g1, c_g2 = st.columns(2)
+                    with c_g1: 
+                        plot_bar("Revenue", fin_ch.loc['Total Revenue'][dates], '#2196F3')
+                    with c_g2: 
+                        plot_bar("Net Income", fin_ch.loc['Net Income'][dates], '#4CAF50')
+
+                    # Graf 2: FCF & Shares
+                    c_g3, c_g4 = st.columns(2)
+                    # Pokusaj FCF
+                    try:
+                        if 'Free Cash Flow' in cf_ch.index:
+                            fcf = cf_ch.loc['Free Cash Flow'][dates]
+                        else:
+                            fcf = cf_ch.loc['Operating Cash Flow'][dates] + cf_ch.loc['Capital Expenditure'][dates]
+                        with c_g3: plot_bar("Free Cash Flow", fcf, '#009688')
+                    except: 
+                        with c_g3: st.info("Nema FCF podataka")
+                    
+                    # Pokusaj Shares
+                    try:
+                        sh_row = 'Ordinary Shares Number' if 'Ordinary Shares Number' in bal_ch.index else 'Share Issued'
+                        if sh_row in bal_ch.index:
+                            with c_g4: plot_bar("Shares Outstanding", bal_ch.loc[sh_row][dates], '#FF9800')
+                    except: pass
+                    
+                    # Graf 3: Cash vs LT Debt
+                    try:
+                        c_row_ch = 'Cash And Cash Equivalents' if 'Cash And Cash Equivalents' in bal_ch.index else 'Cash Cash Equivalents And Short Term Investments'
+                        if c_row_ch in bal_ch.index:
+                            cd = bal_ch.loc[c_row_ch][dates]
+                            # Za LT debt na grafu
+                            ltd_vals = bal_ch.loc[ltd_row][dates] if ltd_row in bal_ch.index else [0]*len(dates)
+                            plot_bar("Cash vs LT Debt", cd, '#4CAF50', ltd_vals, '#FF5252', 'L.T. Debt')
+                    except: pass
 
             with tab_dcf:
-                st.markdown("#### Kalkulator Fer Vrijednosti")
+                st.subheader("Kalkulator Fer Vrijednosti")
                 ci1, ci2 = st.columns(2)
                 with ci1:
-                    g_rate = st.number_input("Rast (Growth %):", 15.0, step=1.0)
-                    d_rate = st.number_input("Diskontna stopa (%):", 10.0, step=0.5)
+                    g_rate = st.number_input("Rast (Growth %):", value=15.0, step=1.0)
+                    d_rate = st.number_input("Diskontna stopa (%):", value=10.0, step=0.5)
                 with ci2:
-                    t_pe = st.number_input("Terminalni PE:", 15.0, step=1.0)
+                    t_pe = st.number_input("Terminalni PE:", value=15.0, step=1.0)
                     eps_start = info.get('trailingEps', 0)
                 
                 # Kalkulacije
                 v_eps = calculate_dcf(eps_start, g_rate, d_rate, t_pe)
                 v_lynch = eps_start * g_rate
-                bv = info.get('bookValue', 0) if info.get('bookValue') else 0
-                v_graham = np.sqrt(22.5 * eps_start * bv) if (eps_start>0 and bv>0) else 0
+                bv = info.get('bookValue', 0)
+                v_graham = np.sqrt(22.5 * eps_start * bv) if (eps_start and bv and eps_start>0 and bv>0) else 0
                 
                 st.markdown("---")
                 c_r1, c_r2, c_r3 = st.columns(3)
@@ -336,9 +390,8 @@ if btn or ticker:
                 c_r2.metric("Peter Lynch Value", f"${v_lynch:.2f}")
                 c_r3.metric("Graham Number", f"${v_graham:.2f}")
                 
-                # Master Graf Usporedbe
+                # Master Graf
                 fig_m = go.Figure()
-                # Trenutna cijena linija
                 fig_m.add_trace(go.Scatter(x=[-0.5, 2.5], y=[curr_price, curr_price], mode="lines", name="Trenutna Cijena", line=dict(color="#333", width=3, dash="dash")))
                 
                 names = ["DCF", "Lynch", "Graham"]
