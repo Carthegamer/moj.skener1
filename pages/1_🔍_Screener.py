@@ -4,26 +4,33 @@ import pandas as pd
 
 st.set_page_config(page_title="Batch Screener", layout="wide")
 
-st.title("🔍 Batch Screener (10 Pillars)")
-st.markdown("Upiši listu dionica za brzu provjeru svih 10 kriterija.")
-
-# --- FUNKCIJA ZA SKRAĆIVANJE IMENA ---
-def clean_name(name):
-    if not name: return ""
-    # Mičemo nepotrebne dodatke da stane u tablicu
-    replacements = [', Inc.', ' Inc.', ' Corporation', ', Corp.', ' Corp.', ' Limited', ' Ltd.', ' plc', ' PLC']
-    for r in replacements:
-        name = name.replace(r, '')
-    return name
+st.title("🔍 Batch Screener (Popravljeni)")
+st.markdown("Analiza 10 Pillara koristeći najnovije TTM podatke.")
 
 # --- INPUT ---
 col_in1, col_in2 = st.columns([3, 1])
 with col_in1:
-    tickers_input = st.text_area("Upiši simbole (odvojene zarezom):", "CRM, AAPL, MSFT, GOOG, AMZN, TSLA, NVDA, META, AMD, NFLX, KO, PEP, MCD", height=70)
+    tickers_input = st.text_area(
+        "Upiši simbole (odvojene zarezom):", 
+        "CRM, AMZN, AAPL, MSFT, GOOG, TSLA, NVDA, META, AMD, NFLX", 
+        height=70
+    )
 
 with col_in2:
     st.markdown("<br>", unsafe_allow_html=True)
     scan_btn = st.button("🚀 Pokreni Skener", type="primary", use_container_width=True)
+
+# --- POMOĆNA FUNKCIJA ZA SIGURNO DOHVAĆANJE REDAKA ---
+def get_row_val(df, keys, col_idx):
+    """Traži redak po imenu (ključu) i vraća vrijednost iz stupca col_idx."""
+    for k in keys:
+        if k in df.index:
+            try:
+                val = df.loc[k].iloc[col_idx]
+                return val
+            except:
+                return None
+    return None
 
 # --- LOGIKA SKENERA ---
 if scan_btn:
@@ -41,103 +48,154 @@ if scan_btn:
             
             try:
                 stock = yf.Ticker(ticker)
-                # Trik: dohvaćamo info da provjerimo jel dionica postoji
                 info = stock.info
                 
-                if info and 'currentPrice' in info:
-                    fin = stock.financials
-                    bal = stock.balance_sheet
-                    cf = stock.cashflow
-                    
-                    if not fin.empty:
-                        # --- 10 PILLARS IZRAČUN ---
-                        p = {} 
-                        years_cnt = min(5, len(fin.columns))
-                        
-                        # Varijable
-                        total_cash = info.get('totalCash', 0)
-                        mkt_cap = info.get('marketCap', 0)
-                        pe = info.get('trailingPE', 0)
-                        if pe is None: pe = 0
-                        
-                        ltd_row = 'Long Term Debt' if 'Long Term Debt' in bal.index else 'Long Term Debt And Capital Lease Obligation'
-                        lt_debt = bal.loc[ltd_row].iloc[0] if ltd_row in bal.index else 0
-                        
-                        c_row = 'Cash And Cash Equivalents' if 'Cash And Cash Equivalents' in bal.index else 'Cash Cash Equivalents And Short Term Investments'
-                        
-                        # 1. Rev Growth
-                        try: p['Rev Growth'] = ((fin.iloc[0,0]-fin.iloc[0,-1]) > 0)
-                        except: p['Rev Growth'] = False
-                        
-                        # 2. Net Inc Growth
-                        try: p['Net Inc Growth'] = ((fin.loc['Net Income'].iloc[0]-fin.loc['Net Income'].iloc[-1]) > 0)
-                        except: p['Net Inc Growth'] = False
-                        
-                        # 3. Cash Growth
-                        try: p['Cash Growth'] = ((bal.loc[c_row].iloc[0]-bal.loc[c_row].iloc[-1]) > 0)
-                        except: p['Cash Growth'] = False
-                        
-                        # 4. Repay Debt
-                        p['Cash > Debt'] = (total_cash >= lt_debt)
-                        
-                        # 5. Repay Liab
-                        try:
-                            l_row = 'Total Non Current Liabilities Net Minority Interest' if 'Total Non Current Liabilities Net Minority Interest' in bal.index else 'Total Non Current Liabilities'
-                            avg_liab = bal.loc[l_row].iloc[:5].mean() if l_row in bal.index else 0
-                            p['Cash > Liab'] = (total_cash >= avg_liab)
-                        except: p['Cash > Liab'] = False
-                        
-                        # 6. PE
-                        p['PE < 22.5'] = (0 < pe < 22.5)
-                        
-                        # 7. ROIC
-                        try:
-                            roic_sum = 0
-                            cnt = min(5, len(fin.columns))
-                            for y in range(cnt):
-                                e = fin.loc['EBIT'].iloc[y] if 'EBIT' in fin.index else fin.loc['Pretax Income'].iloc[y]
-                                ic = bal.loc['Stockholders Equity'].iloc[y] + lt_debt
-                                roic_sum += (e/ic)
-                            p['ROIC > 9%'] = ((roic_sum/cnt)*100 > 9)
-                        except: p['ROIC > 9%'] = False
-                        
-                        # 8. Buyback
-                        try:
-                            sh_now = info.get('sharesOutstanding', 0)
-                            sh_old = bal.loc['Ordinary Shares Number'].iloc[-1] if 'Ordinary Shares Number' in bal.index else sh_now
-                            p['Buyback'] = (sh_now <= sh_old)
-                        except: p['Buyback'] = False
-                        
-                        # 9. Valuation
-                        try:
-                            if 'Free Cash Flow' in cf.index: fcf = cf.loc['Free Cash Flow'].iloc[:5].mean()
-                            else: fcf = (cf.loc['Operating Cash Flow'] + cf.loc['Capital Expenditure']).iloc[:5].mean()
-                            p['Undervalued'] = ((fcf*20) > mkt_cap)
-                        except: p['Undervalued'] = False
-                        
-                        # 10. Div Safety
-                        try:
-                            div_paid = abs(cf.loc['Cash Dividends Paid'].iloc[0]) if 'Cash Dividends Paid' in cf.index else 0
-                            p['Div Safety'] = (True if div_paid == 0 else total_cash > div_paid)
-                        except: p['Div Safety'] = True
+                # Ako nema cijene, preskoči
+                if not info or 'currentPrice' not in info:
+                    raise Exception("No Data")
 
-                        # ZBROJ BODOVA
-                        score = sum([1 for v in p.values() if v])
+                # Dohvati tablice
+                fin = stock.financials
+                bal = stock.balance_sheet
+                cf = stock.cashflow
+                
+                if not fin.empty and not bal.empty:
+                    p = {} 
+                    
+                    # PODACI IZ INFO (TTM - Najsvježiji)
+                    rev_ttm = info.get('totalRevenue')
+                    net_inc_ttm = info.get('netIncomeToCommon')
+                    cash_ttm = info.get('totalCash')
+                    debt_ttm = info.get('totalDebt')
+                    mkt_cap = info.get('marketCap', 0)
+                    pe = info.get('trailingPE', 0)
+                    if pe is None: pe = 0
+                    
+                    # POVIJESNI PODACI (Zadnja dostupna godina, skroz desno)
+                    old_idx = -1 
+                    
+                    # 1. REVENUE GROWTH (TTM vs 4-5 godina prije)
+                    rev_old = get_row_val(fin, ['Total Revenue', 'Revenue'], old_idx)
+                    if rev_ttm and rev_old:
+                        p['Rev Growth'] = (rev_ttm > rev_old)
+                    else:
+                        p['Rev Growth'] = False
+
+                    # 2. NET INCOME GROWTH
+                    ni_old = get_row_val(fin, ['Net Income', 'Net Income Common Stockholders'], old_idx)
+                    if net_inc_ttm is not None and ni_old is not None:
+                        # Provjera rasta (pazimo na negativne brojeve)
+                        p['Net Inc Growth'] = (net_inc_ttm > ni_old)
+                    else:
+                        p['Net Inc Growth'] = False
+
+                    # 3. CASH GROWTH
+                    cash_old = get_row_val(bal, ['Cash And Cash Equivalents', 'Cash Cash Equivalents And Short Term Investments'], old_idx)
+                    if cash_ttm is not None and cash_old is not None:
+                        p['Cash Growth'] = (cash_ttm > cash_old)
+                    else:
+                        p['Cash Growth'] = False
+
+                    # 4. REPAY DEBT (Cash > Long Term Debt)
+                    # Za strogi Rule #1 gledamo Total Debt, ali ti si tražio LT Debt
+                    lt_debt = get_row_val(bal, ['Long Term Debt', 'Long Term Debt And Capital Lease Obligation'], 0)
+                    # Ako nema LT debt u bilanci, uzmi 0
+                    if lt_debt is None: lt_debt = 0
+                    
+                    if cash_ttm is not None:
+                        p['Cash > Debt'] = (cash_ttm >= lt_debt)
+                    else:
+                        p['Cash > Debt'] = False
+                    
+                    # 5. REPAY LIABILITIES
+                    liab_rows = ['Total Non Current Liabilities Net Minority Interest', 'Total Non Current Liabilities']
+                    liab_old = get_row_val(bal, liab_rows, 0) # Trenutna bilanca
+                    if cash_ttm is not None and liab_old is not None:
+                        p['Cash > Liab'] = (cash_ttm >= liab_old)
+                    else:
+                        p['Cash > Liab'] = False
+                    
+                    # 6. PE RATIO
+                    p['PE < 22.5'] = (0 < pe < 22.5)
+                    
+                    # 7. ROIC > 9%
+                    # Pokušavamo izračunati prosjek, ako ne uspije, FAIL
+                    try:
+                        roic_sum = 0
+                        cnt = 0
+                        years = min(5, len(fin.columns))
+                        for y in range(years):
+                            ebit = get_row_val(fin, ['EBIT', 'Pretax Income'], y)
+                            equity = get_row_val(bal, ['Stockholders Equity'], y)
+                            debt_y = get_row_val(bal, ['Total Debt', 'Long Term Debt'], y)
+                            if debt_y is None: debt_y = 0
+                            
+                            if ebit and equity:
+                                invested_cap = equity + debt_y
+                                if invested_cap != 0:
+                                    roic_sum += (ebit / invested_cap)
+                                    cnt += 1
                         
-                        # --- PRIPREMA REDA ZA TABLICU ---
-                        company_name = clean_name(info.get('shortName', info.get('longName', '')))
-                        
-                        row_data = {
-                            "Ticker": ticker,
-                            "Name": company_name,  # NOVI STUPAC
-                            "Score (Max 10)": score,
-                        }
-                        for k, v in p.items():
-                            row_data[k] = "✅" if v else "❌"
-                        
-                        results.append(row_data)
-            
+                        if cnt > 0:
+                            avg_roic = (roic_sum / cnt) * 100
+                            p['ROIC > 9%'] = (avg_roic > 9)
+                        else:
+                            p['ROIC > 9%'] = False
+                    except:
+                        p['ROIC > 9%'] = False
+                    
+                    # 8. SHARE BUYBACK (Shares Outstanding)
+                    shares_now = info.get('sharesOutstanding')
+                    shares_old = get_row_val(bal, ['Ordinary Shares Number', 'Share Issued'], old_idx)
+                    
+                    if shares_now and shares_old:
+                        p['Buyback'] = (shares_now <= shares_old)
+                    else:
+                        p['Buyback'] = False
+                    
+                    # 9. VALUATION (FCF * 20 > Market Cap)
+                    fcf_ttm = info.get('freeCashflow')
+                    # Ako info nema FCF, probaj izračunati iz CF statementa (Op Cash - CapEx)
+                    if fcf_ttm is None and not cf.empty:
+                         op_cash = get_row_val(cf, ['Operating Cash Flow'], 0)
+                         capex = get_row_val(cf, ['Capital Expenditure'], 0)
+                         if op_cash and capex: fcf_ttm = op_cash + capex
+                    
+                    if fcf_ttm and mkt_cap:
+                        p['Undervalued'] = ((fcf_ttm * 20) > mkt_cap)
+                    else:
+                        p['Undervalued'] = False
+                    
+                    # 10. DIVIDEND SAFETY
+                    div_rate = info.get('dividendRate', 0)
+                    if div_rate is None: div_rate = 0
+                    # Ako nema dividende -> Sigurno. Ako ima -> Cash mora biti veci od isplate.
+                    if div_rate == 0:
+                        p['Div Safety'] = True
+                    else:
+                        # Aproksimacija isplate: shares * rate
+                        total_payout = (shares_now * div_rate) if shares_now else 0
+                        p['Div Safety'] = (cash_ttm > total_payout) if cash_ttm else False
+
+                    # --- KRAJ ---
+                    score = sum([1 for v in p.values() if v])
+                    
+                    # Ime kompanije
+                    comp_name = info.get('shortName', ticker)
+                    
+                    row_data = {
+                        "Ticker": ticker,
+                        "Name": comp_name,
+                        "Score (Max 10)": score,
+                    }
+                    for k, v in p.items():
+                        row_data[k] = "✅" if v else "❌"
+                    
+                    results.append(row_data)
+
             except Exception as e:
+                # Za debugging (možeš maknuti kasnije)
+                # st.write(f"Error {ticker}: {e}")
                 pass
             
             progress_bar.progress((i + 1) / len(tickers_list))
@@ -145,46 +203,33 @@ if scan_btn:
         status_text.empty()
         progress_bar.empty()
         
-        # --- PRIKAZ REZULTATA ---
         if results:
             df = pd.DataFrame(results)
             df = df.sort_values(by="Score (Max 10)", ascending=False)
             
-            st.success(f"Skeniranje završeno! Pronađeno {len(df)} dionica.")
-            
-            # TABLICA
+            st.success(f"Analizirano {len(results)} dionica.")
             st.dataframe(
                 df,
                 hide_index=True,
                 use_container_width=True,
                 column_config={
                     "Score (Max 10)": st.column_config.ProgressColumn(
-                        "Score",
-                        format="%d",
-                        min_value=0,
-                        max_value=10,
+                        "Score", format="%d", min_value=0, max_value=10
                     ),
-                    "Name": st.column_config.TextColumn("Kompanija", width="medium"),
                 }
             )
+            
+            # LEGENDA
+            st.markdown("---")
+            st.subheader("📖 Legenda (Rule #1)")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.info("**Rev/NetInc/Cash Growth:** Usporedba TTM (danas) s podacima od prije 4-5 godina.")
+                st.info("**Cash > Debt:** Ukupan Keš veći od Dugoročnog Duga (Long Term Debt).")
+                st.info("**Buyback:** Broj dionica danas manji ili jednak onom prije 5 godina.")
+            with c2:
+                st.info("**ROIC > 9%:** Prosječni povrat na kapital u zadnjih 5 godina.")
+                st.info("**Undervalued:** (Free Cash Flow * 20) > Market Cap.")
+                st.info("**Div Safety:** Keš pokriva isplatu dividende (ili nema dividende).")
         else:
             st.error("Nije pronađen niti jedan valjani podatak.")
-
-# --- LEGENDA NA DNU ---
-st.markdown("---")
-st.subheader("📖 Legenda 10 Pillara")
-
-c1, c2 = st.columns(2)
-with c1:
-    st.info("**1. Rev Growth:** Rast prihoda u zadnjih 5 godina.")
-    st.info("**2. Net Inc Growth:** Rast neto dobiti u zadnjih 5 godina.")
-    st.info("**3. Cash Growth:** Količina novca na računu raste.")
-    st.info("**4. Cash > Debt:** Kompanija ima više novca nego dugoročnog duga.")
-    st.info("**5. Cash > Liab:** Novac pokriva prosječne dugoročne obveze.")
-
-with c2:
-    st.info("**6. PE < 22.5:** P/E omjer je manji od 22.5 (Nije preskupa).")
-    st.info("**7. ROIC > 9%:** Povrat na investirani kapital veći od 9% (Avg 5y).")
-    st.info("**8. Buyback:** Smanjili su broj dionica (kupuju vlastite dionice).")
-    st.info("**9. Undervalued:** Market Cap je manji od (Avg FCF * 20).")
-    st.info("**10. Div Safety:** Dividenda je sigurna (isplaćuju manje nego što imaju keša).")
