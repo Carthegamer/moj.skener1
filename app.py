@@ -7,10 +7,9 @@ import plotly.graph_objects as go
 # --- KONFIGURACIJA STRANICE ---
 st.set_page_config(page_title="Rule #1 Pro Dashboard", layout="wide")
 
-# --- CSS STILOVI (Dizajn i Boje) ---
+# --- CSS STILOVI ---
 st.markdown("""
 <style>
-    /* Glavni okvir za metrike */
     .metric-box {
         background-color: #1E1E1E;
         padding: 15px;
@@ -29,14 +28,12 @@ st.markdown("""
         padding-bottom: 8px;
         margin-bottom: 10px;
     }
-    /* Boje za vrijednosti */
-    .d-green { color: #00C853; font-weight: bold; } /* Tamno zelena (>12%) */
-    .l-green { color: #69F0AE; font-weight: bold; } /* Svijetlo zelena (>9%) */
-    .yellow { color: #FFD740; font-weight: bold; }  /* Žuta */
-    .red { color: #FF5252; font-weight: bold; }     /* Crvena */
+    .l-green { color: #69F0AE; font-weight: bold; } 
+    .d-green { color: #00C853; font-weight: bold; } 
+    .yellow { color: #FFD740; font-weight: bold; }  
+    .red { color: #FF5252; font-weight: bold; }     
     .white { color: #FFFFFF; font-weight: bold; }
     
-    /* Velika cijena */
     .big-ticker { font-size: 1.4rem; color: #aaa; font-weight: 600; }
     .big-price { font-size: 3.5rem; font-weight: 800; line-height: 1; margin: 0; }
 </style>
@@ -52,36 +49,23 @@ def format_num(num):
 
 def get_color_class(value, rule_type):
     if value is None: return "white"
-    
-    # 1. Liquidity (Quick/Current Ratio)
-    # >1.2 Green, 0.9-1.2 Yellow, <0.9 Red
-    if rule_type == "liquidity":
+    if rule_type == "liquidity": 
         if value > 1.2: return "l-green"
         elif value >= 0.9: return "yellow"
         else: return "red"
-        
-    # 2. Debt/Equity
-    # <1 Green, 1-2 Yellow, >2 Red
-    elif rule_type == "debt":
+    elif rule_type == "debt": 
         if value < 1: return "l-green"
         elif value <= 2: return "yellow"
         else: return "red"
-        
-    # 3. Returns (ROA, ROE, ROIC)
-    # >12 Dark Green, 9-12 Light Green, 6-9 Yellow, <6 Red
-    elif rule_type == "returns":
+    elif rule_type == "returns": 
         if value >= 12: return "d-green"
         elif value >= 9: return "l-green"
         elif value >= 6: return "yellow"
         else: return "red"
-        
-    # 4. Interest Coverage
-    # >1.5 Green, 1.15-1.5 Yellow, <1.15 Red
-    elif rule_type == "int_cov":
+    elif rule_type == "int_cov": 
         if value >= 1.5: return "l-green"
         elif value >= 1.15: return "yellow"
         else: return "red"
-        
     return "white"
 
 def calculate_dcf(start_val, growth_rate, discount_rate, terminal_multiple, years=10):
@@ -104,7 +88,6 @@ def get_data(ticker):
 with st.sidebar:
     st.header("⚙️ Postavke")
     ticker = st.text_input("Simbol:", "CRM").upper()
-    # Izbor za grafove
     graph_period = st.radio("Prikaz Grafova:", ["Godišnje (Annual)", "Kvartalno (Quarterly)"])
     btn = st.button("Skeniraj", type="primary")
 
@@ -114,8 +97,7 @@ if btn or ticker:
         fin_y, bal_y, cf_y, fin_q, bal_q, cf_q, info = get_data(ticker)
         
         if not fin_y.empty:
-            # 1. PRIPREMA PODATAKA
-            # Odabir seta za grafove
+            # --- 1. PRIPREMA PODATAKA ---
             if "Quarterly" in graph_period:
                 fin_ch, bal_ch, cf_ch = fin_q, bal_q, cf_q
                 chart_title = "Kvartalni Prikaz"
@@ -123,45 +105,41 @@ if btn or ticker:
                 fin_ch, bal_ch, cf_ch = fin_y, bal_y, cf_y
                 chart_title = "Godišnji Prikaz"
             
-            # Podaci za Pillars (Uvijek Annual)
-            fin, bal, cf = fin_y, bal_y, cf_y
+            fin, bal, cf = fin_y, bal_y, cf_y # Pillars always Annual
             
-            # --- IZRAČUNI ZA METRIKE ---
-            # Cijena
+            # Info & Cijena
             curr_price = info.get('currentPrice', 0)
             prev_close = info.get('previousClose', curr_price)
             price_color = "#4CAF50" if curr_price >= prev_close else "#FF5252"
             
-            # Lijevi stupac (Margine & Cash)
+            # Metrike - Lijevi stupac
             pm = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
             om = info.get('operatingMargins', 0) * 100 if info.get('operatingMargins') else 0
             gm = info.get('grossMargins', 0) * 100 if info.get('grossMargins') else 0
             
             total_cash = info.get('totalCash', 0)
-            # Long Term Debt lookup
             ltd_row = 'Long Term Debt' if 'Long Term Debt' in bal.index else 'Long Term Debt And Capital Lease Obligation'
             lt_debt = bal.loc[ltd_row].iloc[0] if ltd_row in bal.index else 0
-            # Net Cash = Cash - Long Term Debt (Tvoj zahtjev)
             net_cash = total_cash - lt_debt
             
-            div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else None
-            payout = info.get('payoutRatio', 0) * 100 if info.get('payoutRatio') else None
+            raw_div = info.get('dividendYield')
+            div_yield = raw_div * 100 if raw_div is not None else None
+            raw_payout = info.get('payoutRatio')
+            payout = raw_payout * 100 if raw_payout is not None else None
             
-            # Srednji stupac (Ratios)
+            # Metrike - Srednji
             qr = info.get('quickRatio', 0)
             cr = info.get('currentRatio', 0)
             de = info.get('debtToEquity', 0) / 100 if info.get('debtToEquity') else 0
             roa = info.get('returnOnAssets', 0) * 100 if info.get('returnOnAssets') else 0
             roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
             
-            # Interest Coverage Calculation
             try:
                 ebit = fin.loc['EBIT'].iloc[0] if 'EBIT' in fin.index else fin.loc['Pretax Income'].iloc[0]
                 int_exp = abs(fin.loc['Interest Expense'].iloc[0]) if 'Interest Expense' in fin.index else 0
                 int_cov = ebit / int_exp if int_exp > 0 else 0
             except: int_cov = 0
             
-            # ROIC Calculation (Avg 5y)
             try:
                 roic_sum = 0
                 years_cnt = min(5, len(fin.columns))
@@ -172,7 +150,7 @@ if btn or ticker:
                 avg_roic = (roic_sum/years_cnt)*100
             except: avg_roic = 0
 
-            # Desni stupac (Valuacija)
+            # Metrike - Desni
             mkt_cap = info.get('marketCap', 0)
             eps_ttm = info.get('trailingEps', 0)
             pe_ttm = info.get('trailingPE', 0)
@@ -181,7 +159,7 @@ if btn or ticker:
             pb = info.get('priceToBook', 0)
             bvps = info.get('bookValue', 0)
 
-            # --- PRIKAZ HEADER ---
+            # --- PRIKAZ ZAGLAVLJA ---
             col_big1, col_big2 = st.columns([2, 1])
             with col_big1:
                 st.markdown(f"""
@@ -193,11 +171,11 @@ if btn or ticker:
             
             st.markdown("---")
             
-            # TRI GLAVNA STUPCA
             c1, c2, c3 = st.columns(3)
             
-            # 1. Margine, Cash, Dividende
             with c1:
+                dy_str = f"{div_yield:.2f}%" if div_yield is not None else "-"
+                po_str = f"{payout:.2f}%" if payout is not None else "-"
                 st.markdown(f"""
                 <div class="metric-box">
                     <div class="metric-title">💵 Cash & Margine</div>
@@ -209,12 +187,11 @@ if btn or ticker:
                     L.T. Debt: <b>{format_num(lt_debt)}</b><br>
                     Net Cash: <span class="{'l-green' if net_cash>0 else 'red'}">{format_num(net_cash)}</span><br>
                     <hr style="border-color:#444; margin:5px 0;">
-                    Div Yield: <b>{f"{div_yield:.2f}%" if div_yield else "-"}</b><br>
-                    Payout Ratio: <b>{f"{payout:.2f}%" if payout else "-"}</b>
+                    Div Yield: <b>{dy_str}</b><br>
+                    Payout Ratio: <b>{po_str}</b>
                 </div>
                 """, unsafe_allow_html=True)
             
-            # 2. Zdravlje (Boje)
             with c2:
                 st.markdown(f"""
                 <div class="metric-box">
@@ -230,7 +207,6 @@ if btn or ticker:
                 </div>
                 """, unsafe_allow_html=True)
             
-            # 3. Valuacija
             with c3:
                 st.markdown(f"""
                 <div class="metric-box">
@@ -246,11 +222,10 @@ if btn or ticker:
                 </div>
                 """, unsafe_allow_html=True)
             
-            # --- 10 PILLARS LOGIKA ---
+            # --- 10 PILLARS ---
             st.subheader("🏛️ 10 Pillars Analiza")
-            # Tu koristimo jednostavniji prikaz da ne pukne HTML
             pillars = {}
-            # 1-3
+            # Calculation logic same as before
             try: pillars['Revenue Growth'] = (((fin.iloc[0,0]-fin.iloc[0,-1])/fin.iloc[0,-1]) > 0, "")
             except: pillars['Revenue Growth'] = (False, "")
             try: pillars['Net Inc Growth'] = (((fin.loc['Net Income'].iloc[0]-fin.loc['Net Income'].iloc[-1])/abs(fin.loc['Net Income'].iloc[-1])) > 0, "")
@@ -259,7 +234,6 @@ if btn or ticker:
                 c_row = 'Cash And Cash Equivalents' if 'Cash And Cash Equivalents' in bal.index else 'Cash Cash Equivalents And Short Term Investments'
                 pillars['Cash Growth'] = (((bal.loc[c_row].iloc[0]-bal.loc[c_row].iloc[-1])/abs(bal.loc[c_row].iloc[-1])) > 0, "")
             except: pillars['Cash Growth'] = (False, "")
-            # 4-5
             try: pillars['Repay Debt (Cash > LT Debt)'] = (total_cash >= lt_debt, f"Cash: {format_num(total_cash)}")
             except: pillars['Repay Debt (Cash > LT Debt)'] = (False, "")
             try:
@@ -267,10 +241,8 @@ if btn or ticker:
                 avg_liab = bal.loc[l_row].iloc[:5].mean() if l_row in bal.index else 0
                 pillars['Repay Liab (Cash > Avg Liab)'] = (total_cash >= avg_liab, "")
             except: pillars['Repay Liab (Cash > Avg Liab)'] = (False, "")
-            # 6-7
             pillars['PE < 22.5'] = (0 < pe_ttm < 22.5, f"{pe_ttm:.2f}")
             pillars['ROIC > 9%'] = (avg_roic > 9, f"{avg_roic:.2f}%")
-            # 8-10
             try:
                 sh_now = info.get('sharesOutstanding', 0)
                 sh_old = bal.loc['Ordinary Shares Number'].iloc[-1] if 'Ordinary Shares Number' in bal.index else sh_now
@@ -281,27 +253,26 @@ if btn or ticker:
                 else: fcf_avg = (cf.loc['Operating Cash Flow'] + cf.loc['Capital Expenditure']).iloc[:5].mean()
                 pillars['FCF x20 > Market Cap'] = ((fcf_avg*20) > mkt_cap, "")
             except: pillars['FCF x20 > Market Cap'] = (False, "")
-            pillars['Dividend Safety'] = (True, "Safe/No Div")
+            try:
+                div_paid = abs(cf.loc['Cash Dividends Paid'].iloc[0]) if 'Cash Dividends Paid' in cf.index else 0
+                if div_paid == 0: pillars['Dividend Safety'] = (True, "No Div")
+                else: pillars['Dividend Safety'] = (total_cash > div_paid, "Cash > Div Paid")
+            except: pillars['Dividend Safety'] = (True, "Safe")
 
-            # Prikaz Pillara
             cp1, cp2 = st.columns(2)
             def show_pillar(col, k, v):
                 passed, txt = v
                 if passed: col.success(f"✅ {k} {txt}")
                 else: col.error(f"❌ {k} {txt}")
-            
             with cp1:
-                for k in ['Revenue Growth', 'Net Inc Growth', 'Cash Growth', 'ROIC > 9%', 'PE < 22.5']:
-                    show_pillar(st, k, pillars[k])
+                for k in ['Revenue Growth', 'Net Inc Growth', 'Cash Growth', 'ROIC > 9%', 'PE < 22.5']: show_pillar(st, k, pillars[k])
             with cp2:
-                for k in ['Repay Debt (Cash > LT Debt)', 'Repay Liab (Cash > Avg Liab)', 'Share Buyback', 'Dividend Safety', 'FCF x20 > Market Cap']:
-                    show_pillar(st, k, pillars[k])
+                for k in ['Repay Debt (Cash > LT Debt)', 'Repay Liab (Cash > Avg Liab)', 'Share Buyback', 'Dividend Safety', 'FCF x20 > Market Cap']: show_pillar(st, k, pillars[k])
 
             st.markdown("---")
 
-            # --- GRAFOVI (PLOTLY STUPCI) ---
+            # --- GRAFOVI ---
             st.subheader(f"📈 Financijski Grafovi ({chart_title})")
-            
             dates = fin_ch.columns[::-1]
             d_str = [str(d).split(' ')[0] for d in dates]
 
@@ -310,21 +281,11 @@ if btn or ticker:
                 fig.add_trace(go.Bar(x=d_str, y=y1, name=name1, marker_color=color1))
                 if y2 is not None:
                     fig.add_trace(go.Bar(x=d_str, y=y2, name=name2, marker_color=color2))
-                fig.update_layout(
-                    title=title, template="plotly_white", barmode='group', 
-                    height=350, margin=dict(l=10, r=10, t=40, b=10)
-                )
+                fig.update_layout(title=title, template="plotly_white", barmode='group', height=350, margin=dict(l=10, r=10, t=40, b=10))
                 st.plotly_chart(fig, use_container_width=True)
 
             col_g1, col_g2 = st.columns(2)
-            
-            # Graf 1: Revenue & Net Income
-            with col_g1:
-                plot_bar_chart("Prihodi & Dobit", 
-                               fin_ch.loc['Total Revenue'][dates], "Revenue", "#2196F3",
-                               fin_ch.loc['Net Income'][dates], "Net Income", "#4CAF50")
-            
-            # Graf 2: Cash vs Long Term Debt
+            with col_g1: plot_bar_chart("Prihodi & Dobit", fin_ch.loc['Total Revenue'][dates], "Revenue", "#2196F3", fin_ch.loc['Net Income'][dates], "Net Income", "#4CAF50")
             with col_g2:
                 try:
                     c_row_ch = 'Cash And Cash Equivalents' if 'Cash And Cash Equivalents' in bal_ch.index else 'Cash Cash Equivalents And Short Term Investments'
@@ -334,20 +295,16 @@ if btn or ticker:
                 except: st.info("Nema podataka za Cash/Debt graf.")
             
             col_g3, col_g4 = st.columns(2)
-            
-            # Graf 3: Shares & FCF
             with col_g3:
                 try:
                     if 'Free Cash Flow' in cf_ch.index: fcf_c = cf_ch.loc['Free Cash Flow'][dates]
                     else: fcf_c = cf_ch.loc['Operating Cash Flow'][dates] + cf_ch.loc['Capital Expenditure'][dates]
                     plot_bar_chart("Free Cash Flow", fcf_c, "FCF", "#009688")
                 except: pass
-            
             with col_g4:
                 try:
                     sh_row = 'Ordinary Shares Number' if 'Ordinary Shares Number' in bal_ch.index else 'Share Issued'
-                    if sh_row in bal_ch.index:
-                        plot_bar_chart("Broj Dionica (Shares Outstanding)", bal_ch.loc[sh_row][dates], "Shares", "#FF9800")
+                    if sh_row in bal_ch.index: plot_bar_chart("Broj Dionica", bal_ch.loc[sh_row][dates], "Shares", "#FF9800")
                 except: pass
             
             # --- DCF ---
@@ -360,24 +317,31 @@ if btn or ticker:
                 d_rate = st.number_input("Diskontna stopa (%):", 10.0, step=0.5)
             with dc2:
                 t_pe = st.number_input("Terminalni P/E:", 15.0, step=1.0)
-                start_eps = info.get('trailingEps', 0)
+                eps_start = info.get('trailingEps', 0)
             
-            v_eps = calculate_dcf(start_eps, g_rate, d_rate, t_pe)
-            v_lynch = start_eps * g_rate
-            v_graham = np.sqrt(22.5 * start_eps * bvps) if (start_eps>0 and bvps>0) else 0
+            v_eps = calculate_dcf(eps_start, g_rate, d_rate, t_pe)
+            v_lynch = eps_start * g_rate
+            # Graham fix: check if positive
+            if eps_start > 0 and bvps > 0:
+                v_graham = np.sqrt(22.5 * eps_start * bvps)
+            else:
+                v_graham = 0
             
-            c_res1, c_res2, c_res3 = st.columns(3)
-            c_res1.metric("DCF Vrijednost", f"${v_eps:.2f}")
-            c_res2.metric("Peter Lynch Value", f"${v_lynch:.2f}")
-            c_res3.metric("Graham Number", f"${v_graham:.2f}")
+            c_r1, c_r2, c_r3 = st.columns(3)
+            c_r1.metric("DCF Vrijednost", f"${v_eps:.2f}")
+            c_r2.metric("Peter Lynch Value", f"${v_lynch:.2f}")
+            c_r3.metric("Graham Number", f"${v_graham:.2f}")
             
-            # Usporedba graf
+            # POPRAVLJEN DCF GRAF (HORIZONTALNA CRTA)
             fig_m = go.Figure()
-            fig_m.add_trace(go.Scatter(x=[-0.5, 2.5], y=[curr_price, curr_price], mode="lines", name="Cijena", line=dict(color="#333", width=3, dash="dash")))
             names = ["DCF", "Lynch", "Graham"]
             vals = [v_eps, v_lynch, v_graham]
             cols = ['#2196F3', '#9C27B0', '#FF9800']
             fig_m.add_trace(go.Bar(x=names, y=vals, marker_color=cols, text=[f"${v:.2f}" for v in vals], textposition='auto'))
+            
+            # Koristimo add_hline za sigurnu liniju cijene
+            fig_m.add_hline(y=curr_price, line_dash="dash", line_color="black", line_width=3, annotation_text=f"Cijena: ${curr_price}")
+            
             fig_m.update_layout(title="Fer Vrijednost vs Cijena", height=400, template="plotly_white")
             st.plotly_chart(fig_m, use_container_width=True)
 
