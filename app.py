@@ -36,6 +36,14 @@ st.markdown("""
     
     .big-ticker { font-size: 1.4rem; color: #aaa; font-weight: 600; }
     .big-price { font-size: 3.5rem; font-weight: 800; line-height: 1; margin: 0; }
+    
+    /* Stil za Scanner 1 */
+    .scanner1-box {
+        border: 2px dashed #444;
+        padding: 20px;
+        border-radius: 10px;
+        background-color: #111;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,7 +105,6 @@ if btn or ticker:
         fin_y, bal_y, cf_y, fin_q, bal_q, cf_q, info = get_data(ticker)
         
         if not fin_y.empty:
-            # --- 1. PRIPREMA PODATAKA ---
             if "Quarterly" in graph_period:
                 fin_ch, bal_ch, cf_ch = fin_q, bal_q, cf_q
                 chart_title = "Kvartalni Prikaz"
@@ -105,14 +112,14 @@ if btn or ticker:
                 fin_ch, bal_ch, cf_ch = fin_y, bal_y, cf_y
                 chart_title = "Godišnji Prikaz"
             
-            fin, bal, cf = fin_y, bal_y, cf_y # Pillars always Annual
+            fin, bal, cf = fin_y, bal_y, cf_y 
             
-            # Info & Cijena
+            # --- HEADER INFO ---
             curr_price = info.get('currentPrice', 0)
             prev_close = info.get('previousClose', curr_price)
             price_color = "#4CAF50" if curr_price >= prev_close else "#FF5252"
             
-            # Metrike - Lijevi stupac
+            # Metrike
             pm = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
             om = info.get('operatingMargins', 0) * 100 if info.get('operatingMargins') else 0
             gm = info.get('grossMargins', 0) * 100 if info.get('grossMargins') else 0
@@ -127,7 +134,6 @@ if btn or ticker:
             raw_payout = info.get('payoutRatio')
             payout = raw_payout * 100 if raw_payout is not None else None
             
-            # Metrike - Srednji
             qr = info.get('quickRatio', 0)
             cr = info.get('currentRatio', 0)
             de = info.get('debtToEquity', 0) / 100 if info.get('debtToEquity') else 0
@@ -150,7 +156,6 @@ if btn or ticker:
                 avg_roic = (roic_sum/years_cnt)*100
             except: avg_roic = 0
 
-            # Metrike - Desni
             mkt_cap = info.get('marketCap', 0)
             eps_ttm = info.get('trailingEps', 0)
             pe_ttm = info.get('trailingPE', 0)
@@ -159,7 +164,7 @@ if btn or ticker:
             pb = info.get('priceToBook', 0)
             bvps = info.get('bookValue', 0)
 
-            # --- PRIKAZ ZAGLAVLJA ---
+            # --- PRIKAZ HEADER ---
             col_big1, col_big2 = st.columns([2, 1])
             with col_big1:
                 st.markdown(f"""
@@ -225,7 +230,6 @@ if btn or ticker:
             # --- 10 PILLARS ---
             st.subheader("🏛️ 10 Pillars Analiza")
             pillars = {}
-            # Calculation logic same as before
             try: pillars['Revenue Growth'] = (((fin.iloc[0,0]-fin.iloc[0,-1])/fin.iloc[0,-1]) > 0, "")
             except: pillars['Revenue Growth'] = (False, "")
             try: pillars['Net Inc Growth'] = (((fin.loc['Net Income'].iloc[0]-fin.loc['Net Income'].iloc[-1])/abs(fin.loc['Net Income'].iloc[-1])) > 0, "")
@@ -264,6 +268,7 @@ if btn or ticker:
                 passed, txt = v
                 if passed: col.success(f"✅ {k} {txt}")
                 else: col.error(f"❌ {k} {txt}")
+            
             with cp1:
                 for k in ['Revenue Growth', 'Net Inc Growth', 'Cash Growth', 'ROIC > 9%', 'PE < 22.5']: show_pillar(st, k, pillars[k])
             with cp2:
@@ -313,15 +318,16 @@ if btn or ticker:
             
             dc1, dc2 = st.columns(2)
             with dc1:
-                g_rate = st.number_input("Rast (Growth %):", 15.0, step=1.0)
-                d_rate = st.number_input("Diskontna stopa (%):", 10.0, step=0.5)
+                # Maknuti min_value i max_value za potpunu slobodu
+                g_rate = st.number_input("Rast (Growth %):", value=15.0, step=0.1)
+                d_rate = st.number_input("Diskontna stopa (%):", value=10.0, step=0.1)
             with dc2:
-                t_pe = st.number_input("Terminalni P/E:", 15.0, step=1.0)
+                t_pe = st.number_input("Terminalni P/E:", value=15.0, step=0.1)
                 eps_start = info.get('trailingEps', 0)
             
             v_eps = calculate_dcf(eps_start, g_rate, d_rate, t_pe)
             v_lynch = eps_start * g_rate
-            # Graham fix: check if positive
+            # Graham fix
             if eps_start > 0 and bvps > 0:
                 v_graham = np.sqrt(22.5 * eps_start * bvps)
             else:
@@ -332,18 +338,47 @@ if btn or ticker:
             c_r2.metric("Peter Lynch Value", f"${v_lynch:.2f}")
             c_r3.metric("Graham Number", f"${v_graham:.2f}")
             
-            # POPRAVLJEN DCF GRAF (HORIZONTALNA CRTA)
             fig_m = go.Figure()
             names = ["DCF", "Lynch", "Graham"]
             vals = [v_eps, v_lynch, v_graham]
             cols = ['#2196F3', '#9C27B0', '#FF9800']
             fig_m.add_trace(go.Bar(x=names, y=vals, marker_color=cols, text=[f"${v:.2f}" for v in vals], textposition='auto'))
-            
-            # Koristimo add_hline za sigurnu liniju cijene
-            fig_m.add_hline(y=curr_price, line_dash="dash", line_color="black", line_width=3, annotation_text=f"Cijena: ${curr_price}")
-            
+            # Horizontal line for Current Price
+            fig_m.add_hline(y=curr_price, line_dash="dash", line_color="black", annotation_text=f"Cijena: ${curr_price}")
             fig_m.update_layout(title="Fer Vrijednost vs Cijena", height=400, template="plotly_white")
             st.plotly_chart(fig_m, use_container_width=True)
 
         else:
             st.error("Nema podataka za ovaj simbol.")
+            
+    # --- SCANNER 1 (MANUAL CALCULATOR) ---
+    st.markdown("---")
+    st.markdown("""<div class="scanner1-box">""", unsafe_allow_html=True)
+    st.subheader("🛠️ Ručni Kalkulator (Scanner 1)")
+    
+    sc1, sc2, sc3 = st.columns(3)
+    with sc1:
+        man_eps = st.number_input("Trenutni EPS:", value=5.85, step=0.01)
+    with sc2:
+        man_growth = st.number_input("Očekivani Rast (%):", value=15.0, step=0.1)
+    with sc3:
+        man_pe = st.number_input("Očekivani P/E:", value=30.0, step=0.1)
+    
+    # Calculation Scanner 1 logic
+    # Future EPS = EPS * (1 + growth)^10
+    fut_eps = man_eps * ((1 + man_growth/100) ** 10)
+    # Future Price = Fut EPS * PE
+    fut_price = fut_eps * man_pe
+    # Sticker = Future Price / 4 (Rule #1 shortcut for 15% discount over 10y)
+    sticker = fut_price / 4
+    # MOS = Sticker / 2
+    mos = sticker / 2
+    
+    st.write("---")
+    res1, res2, res3, res4 = st.columns(4)
+    res1.metric("Budući EPS (10g)", f"${fut_eps:.2f}")
+    res2.metric("Buduća Cijena", f"${fut_price:.2f}")
+    res3.metric("Fer Vrijednost (Sticker)", f"${sticker:.2f}")
+    res4.metric("MOS Cijena (Kupuj)", f"${mos:.2f}")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
