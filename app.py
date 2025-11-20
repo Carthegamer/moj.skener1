@@ -37,12 +37,13 @@ st.markdown("""
     .big-ticker { font-size: 1.4rem; color: #aaa; font-weight: 600; }
     .big-price { font-size: 3.5rem; font-weight: 800; line-height: 1; margin: 0; }
     
-    /* Stil za Scanner 1 */
-    .scanner1-box {
-        border: 2px dashed #444;
-        padding: 20px;
-        border-radius: 10px;
-        background-color: #111;
+    /* Stil za Magic Formula Box */
+    .magic-box {
+        border: 2px solid #4CAF50; /* Zeleni rub */
+        padding: 25px;
+        border-radius: 12px;
+        background-color: #1a1a1a;
+        margin-top: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -312,22 +313,20 @@ if btn or ticker:
                     if sh_row in bal_ch.index: plot_bar_chart("Broj Dionica", bal_ch.loc[sh_row][dates], "Shares", "#FF9800")
                 except: pass
             
-            # --- DCF ---
+            # --- DCF (AUTOMATSKI) ---
             st.markdown("---")
-            st.subheader("🧮 DCF Valuacija")
+            st.subheader("🧮 DCF Valuacija (Auto)")
             
             dc1, dc2 = st.columns(2)
             with dc1:
-                # Maknuti min_value i max_value za potpunu slobodu
-                g_rate = st.number_input("Rast (Growth %):", value=15.0, step=0.1)
-                d_rate = st.number_input("Diskontna stopa (%):", value=10.0, step=0.1)
+                g_rate = st.number_input("Rast (Growth %):", value=15.0, step=1.0)
+                d_rate = st.number_input("Diskontna stopa (%):", value=10.0, step=0.5)
             with dc2:
-                t_pe = st.number_input("Terminalni P/E:", value=15.0, step=0.1)
+                t_pe = st.number_input("Terminalni P/E:", value=15.0, step=1.0)
                 eps_start = info.get('trailingEps', 0)
             
             v_eps = calculate_dcf(eps_start, g_rate, d_rate, t_pe)
             v_lynch = eps_start * g_rate
-            # Graham fix
             if eps_start > 0 and bvps > 0:
                 v_graham = np.sqrt(22.5 * eps_start * bvps)
             else:
@@ -343,7 +342,6 @@ if btn or ticker:
             vals = [v_eps, v_lynch, v_graham]
             cols = ['#2196F3', '#9C27B0', '#FF9800']
             fig_m.add_trace(go.Bar(x=names, y=vals, marker_color=cols, text=[f"${v:.2f}" for v in vals], textposition='auto'))
-            # Horizontal line for Current Price
             fig_m.add_hline(y=curr_price, line_dash="dash", line_color="black", annotation_text=f"Cijena: ${curr_price}")
             fig_m.update_layout(title="Fer Vrijednost vs Cijena", height=400, template="plotly_white")
             st.plotly_chart(fig_m, use_container_width=True)
@@ -351,34 +349,34 @@ if btn or ticker:
         else:
             st.error("Nema podataka za ovaj simbol.")
             
-    # --- SCANNER 1 (MANUAL CALCULATOR) ---
+    # --- MAGIC FORMULA (MANUAL CALCULATION) ---
     st.markdown("---")
-    st.markdown("""<div class="scanner1-box">""", unsafe_allow_html=True)
-    st.subheader("🛠️ Ručni Kalkulator (Scanner 1)")
+    st.markdown("""<div class="magic-box">""", unsafe_allow_html=True)
+    st.subheader("✨ Magic Formula Calculation (Ručni Unos)")
     
-    sc1, sc2, sc3 = st.columns(3)
-    with sc1:
-        man_eps = st.number_input("Trenutni EPS:", value=5.85, step=0.01)
-    with sc2:
-        man_growth = st.number_input("Očekivani Rast (%):", value=15.0, step=0.1)
-    with sc3:
-        man_pe = st.number_input("Očekivani P/E:", value=30.0, step=0.1)
+    mf1, mf2, mf3 = st.columns(3)
+    with mf1:
+        m_eps = st.number_input("Trenutni EPS:", value=5.85, step=0.01, key="m_eps")
+    with mf2:
+        m_growth = st.number_input("Očekivani Rast (%):", value=15.0, step=0.1, key="m_growth")
+    with mf3:
+        m_pe = st.number_input("Očekivani P/E:", value=30.0, step=0.1, key="m_pe")
     
-    # Calculation Scanner 1 logic
-    # Future EPS = EPS * (1 + growth)^10
-    fut_eps = man_eps * ((1 + man_growth/100) ** 10)
-    # Future Price = Fut EPS * PE
-    fut_price = fut_eps * man_pe
-    # Sticker = Future Price / 4 (Rule #1 shortcut for 15% discount over 10y)
+    # Rule #1 Logic
+    # 1. Future EPS = EPS * (1+g)^10
+    fut_eps = m_eps * ((1 + m_growth/100)**10)
+    # 2. Future Price = Fut EPS * PE
+    fut_price = fut_eps * m_pe
+    # 3. Sticker Price = Future Price / 4 (approx 15% discount over 10y)
     sticker = fut_price / 4
-    # MOS = Sticker / 2
+    # 4. MOS = Sticker / 2
     mos = sticker / 2
     
-    st.write("---")
-    res1, res2, res3, res4 = st.columns(4)
-    res1.metric("Budući EPS (10g)", f"${fut_eps:.2f}")
-    res2.metric("Buduća Cijena", f"${fut_price:.2f}")
-    res3.metric("Fer Vrijednost (Sticker)", f"${sticker:.2f}")
-    res4.metric("MOS Cijena (Kupuj)", f"${mos:.2f}")
+    st.markdown("<br>", unsafe_allow_html=True)
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Budući EPS (10g)", f"${fut_eps:.2f}")
+    r2.metric("Buduća Cijena", f"${fut_price:.2f}")
+    r3.metric("Fer Vrijednost (Sticker)", f"${sticker:.2f}")
+    r4.metric("MOS Cijena (Kupuj)", f"${mos:.2f}", delta_color="normal")
     
     st.markdown("</div>", unsafe_allow_html=True)
