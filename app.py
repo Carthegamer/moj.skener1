@@ -3,22 +3,20 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
-# --- KONFIGURACIJA STRANICE ---
-st.set_page_config(page_title="Rule #1 Pro Dashboard", layout="wide")
+# --- POSTAVKE ---
+st.set_page_config(page_title="Rule #1 Dashboard", layout="wide")
 
-# --- CSS STILOVI ---
+# --- CSS DIZAJN ---
 st.markdown("""
 <style>
-    .metric-box { background-color: #1E1E1E; padding: 15px; border-radius: 8px; border: 1px solid #333; margin-bottom: 10px; font-size: 0.95rem; color: #eee; line-height: 1.6; }
+    .metric-box { background-color: #1E1E1E; padding: 15px; border-radius: 8px; border: 1px solid #333; margin-bottom: 10px; font-size: 0.95rem; color: #eee; }
+    .big-price { font-size: 3.5rem; font-weight: 800; margin: 0; line-height: 1; }
+    .big-ticker { font-size: 1.4rem; color: #aaa; font-weight: 600; }
     .l-green { color: #69F0AE; font-weight: bold; } 
     .d-green { color: #00C853; font-weight: bold; } 
     .yellow { color: #FFD740; font-weight: bold; }  
     .red { color: #FF5252; font-weight: bold; }     
-    .white { color: #FFFFFF; font-weight: bold; }
-    .big-ticker { font-size: 1.4rem; color: #aaa; font-weight: 600; }
-    .big-price { font-size: 3.5rem; font-weight: 800; line-height: 1; margin: 0; }
     .magic-box { border: 2px solid #4CAF50; padding: 25px; border-radius: 12px; background-color: #1a1a1a; margin-top: 20px; }
 </style>
 """, unsafe_allow_html=True)
@@ -50,19 +48,10 @@ def calculate_dcf(start_val, growth_rate, discount_rate, terminal_multiple, year
     terminal_discounted = terminal_val / ((1 + discount_rate/100) ** years)
     return discounted_sum + terminal_discounted
 
-def calculate_rsi(data, window=14):
-    delta = data.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
 @st.cache_data
-def get_data_tech(ticker):
-    # Preimenovana funkcija da se izbjegne Cache Error
+def get_data(ticker):
     stock = yf.Ticker(ticker)
-    history = stock.history(period="2y") # Dohvaćamo povijest cijena
-    return stock.financials, stock.balance_sheet, stock.cashflow, stock.quarterly_financials, stock.quarterly_balance_sheet, stock.quarterly_cashflow, stock.info, history
+    return stock.financials, stock.balance_sheet, stock.cashflow, stock.quarterly_financials, stock.quarterly_balance_sheet, stock.quarterly_cashflow, stock.info
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -74,8 +63,7 @@ with st.sidebar:
 # --- GLAVNI DIO ---
 if btn or ticker:
     with st.spinner(f'Analiziram {ticker}...'):
-        # Dohvaćamo podatke (8 varijabli)
-        fin_y, bal_y, cf_y, fin_q, bal_q, cf_q, info, history = get_data_tech(ticker)
+        fin_y, bal_y, cf_y, fin_q, bal_q, cf_q, info = get_data(ticker)
         
         if not fin_y.empty:
             if graph_period == "Kvartalno": fin_ch, bal_ch, cf_ch = fin_q, bal_q, cf_q
@@ -95,29 +83,42 @@ if btn or ticker:
             # METRIKE (3 Stupca)
             c1, c2, c3 = st.columns(3)
             
-            pm, om = info.get('profitMargins', 0)*100, info.get('operatingMargins', 0)*100
+            # Podaci za metrike
+            pm = info.get('profitMargins', 0)*100 if info.get('profitMargins') else 0
+            om = info.get('operatingMargins', 0)*100 if info.get('operatingMargins') else 0
+            gm = info.get('grossMargins', 0)*100 if info.get('grossMargins') else 0
+            
             total_cash = info.get('totalCash', 0)
             ltd_row = 'Long Term Debt' if 'Long Term Debt' in bal.index else 'Long Term Debt And Capital Lease Obligation'
             lt_debt = bal.loc[ltd_row].iloc[0] if ltd_row in bal.index else 0
             net_cash = total_cash - lt_debt
+            dy = info.get('dividendYield', 0)*100 if info.get('dividendYield') else None
             
             with c1:
                 st.markdown(f"""<div class="metric-box"><b>Net Margin:</b> {pm:.2f}% | <b>Op:</b> {om:.2f}%<br><b>Total Cash:</b> {format_num(total_cash)}<br><b>L.T. Debt:</b> {format_num(lt_debt)}<br><b>Net Cash:</b> <span style="color:{'#4CAF50' if net_cash>0 else '#FF5252'}">{format_num(net_cash)}</span></div>""", unsafe_allow_html=True)
 
-            qr, cr, de = info.get('quickRatio', 0), info.get('currentRatio', 0), info.get('debtToEquity', 0)/100
-            roa, roe = info.get('returnOnAssets', 0)*100, info.get('returnOnEquity', 0)*100
+            qr = info.get('quickRatio', 0)
+            cr = info.get('currentRatio', 0)
+            de = info.get('debtToEquity', 0)/100 if info.get('debtToEquity') else 0
+            roa = info.get('returnOnAssets', 0)*100 if info.get('returnOnAssets') else 0
+            roe = info.get('returnOnEquity', 0)*100 if info.get('returnOnEquity') else 0
             
             with c2:
                 st.markdown(f"""<div class="metric-box">Quick: <span class="{get_color_class(qr,'liquidity')}">{qr:.2f}</span> | Curr: <span class="{get_color_class(cr,'liquidity')}">{cr:.2f}</span><br>Debt/Eq: <span class="{get_color_class(de,'debt')}">{de:.2f}</span><br>ROA: <span class="{get_color_class(roa,'returns')}">{roa:.1f}%</span> | ROE: <span class="{get_color_class(roe,'returns')}">{roe:.1f}%</span></div>""", unsafe_allow_html=True)
 
-            mkt_cap, eps, pe = info.get('marketCap', 0), info.get('trailingEps', 0), info.get('trailingPE', 0)
+            mkt_cap = info.get('marketCap', 0)
+            eps = info.get('trailingEps', 0)
+            pe = info.get('trailingPE', 0)
+            pe_formatted = f"{pe:.2f}" if pe else "-"
             
             with c3:
-                st.markdown(f"""<div class="metric-box"><b>Mkt Cap:</b> {format_num(mkt_cap)}<br><b>EPS:</b> ${eps}<br><b>P/E:</b> {pe if pe else '-'}</div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="metric-box"><b>Mkt Cap:</b> {format_num(mkt_cap)}<br><b>EPS:</b> ${eps}<br><b>P/E:</b> {pe_formatted}</div>""", unsafe_allow_html=True)
 
             # 10 PILLARS
             st.subheader("🏛️ 10 Pillars Analiza")
             pillars = {}
+            
+            # Logika izračuna
             try: pillars['Revenue Growth'] = (((fin.iloc[0,0]-fin.iloc[0,-1])/fin.iloc[0,-1]) > 0, "")
             except: pillars['Revenue Growth'] = (False, "")
             try: pillars['Net Inc Growth'] = (((fin.loc['Net Income'].iloc[0]-fin.loc['Net Income'].iloc[-1])/abs(fin.loc['Net Income'].iloc[-1])) > 0, "")
@@ -133,14 +134,18 @@ if btn or ticker:
                 avg_liab = bal.loc[l_row].iloc[:5].mean() if l_row in bal.index else 0
                 pillars['Repay Liab'] = (total_cash >= avg_liab, "")
             except: pillars['Repay Liab'] = (False, "")
+            
+            if pe is None: pe = 0
             pillars['PE < 22.5'] = (0 < pe < 22.5, f"{pe:.2f}")
+            
             try:
                 roic_sum = 0
-                for i in range(min(5, len(fin.columns))):
+                cnt = min(5, len(fin.columns))
+                for i in range(cnt):
                     e = fin.loc['EBIT'].iloc[i] if 'EBIT' in fin.index else fin.loc['Pretax Income'].iloc[i]
                     ic = bal.loc['Stockholders Equity'].iloc[i] + lt_debt
                     roic_sum += (e/ic)
-                avg_roic = (roic_sum/5)*100
+                avg_roic = (roic_sum/cnt)*100
                 pillars['ROIC > 9%'] = (avg_roic > 9, f"{avg_roic:.1f}%")
             except: pillars['ROIC > 9%'] = (False, "")
             try:
@@ -155,80 +160,50 @@ if btn or ticker:
             except: pillars['FCF x20 > MktCap'] = (False, "")
             pillars['Div Safety'] = (True, "Safe")
 
+            # --- PRIKAZ PILLARA (POPRAVLJENO) ---
+            # Sada koristimo običan if/else da izbjegnemo ispisivanje koda na ekran
             cp1, cp2 = st.columns(2)
-            def show_p(col, k, v): col.success(f"✅ {k} {v[1]}") if v[0] else col.error(f"❌ {k} {v[1]}")
+            
+            def show_p(col, k, v):
+                passed, txt = v
+                if passed:
+                    col.success(f"✅ {k} {txt}")
+                else:
+                    col.error(f"❌ {k} {txt}")
+
             with cp1: 
-                for k in ['Revenue Growth', 'Net Inc Growth', 'Cash Growth', 'ROIC > 9%', 'PE < 22.5']: show_p(st, k, pillars[k])
+                for k in ['Revenue Growth', 'Net Inc Growth', 'Cash Growth', 'ROIC > 9%', 'PE < 22.5']:
+                    show_p(st, k, pillars[k])
             with cp2: 
-                for k in ['Repay Debt', 'Repay Liab', 'Share Buyback', 'Div Safety', 'FCF x20 > MktCap']: show_p(st, k, pillars[k])
+                for k in ['Repay Debt', 'Repay Liab', 'Share Buyback', 'Div Safety', 'FCF x20 > MktCap']:
+                    show_p(st, k, pillars[k])
 
             st.markdown("---")
 
-            # --- TABS (GRAFOVI, TECH, DCF) ---
-            tab_fund, tab_tech, tab_dcf = st.tabs(["📈 Financijski Grafovi", "📉 Tehnička Analiza", "🧮 DCF & Valuacija"])
-
-            # TAB 1: FUNDAMENTI
-            with tab_fund:
-                dates = fin_ch.columns[::-1]
-                d_str = [str(d).split(' ')[0] for d in dates]
-                
-                cg1, cg2 = st.columns(2)
-                with cg1:
-                    fig = go.Figure()
-                    fig.add_trace(go.Bar(x=d_str, y=fin_ch.loc['Total Revenue'][dates], name="Rev", marker_color='#2196F3'))
-                    fig.add_trace(go.Bar(x=d_str, y=fin_ch.loc['Net Income'][dates], name="Net Inc", marker_color='#4CAF50'))
-                    fig.update_layout(title="Prihodi i Dobit", template="plotly_white", barmode='group', height=350)
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with cg2:
-                    try:
-                        c_row_ch = 'Cash And Cash Equivalents' if 'Cash And Cash Equivalents' in bal_ch.index else 'Cash Cash Equivalents And Short Term Investments'
-                        cd = bal_ch.loc[c_row_ch][dates]
-                        ld = bal_ch.loc[ltd_row][dates] if ltd_row in bal_ch.index else [0]*len(dates)
-                        fig2 = go.Figure()
-                        fig2.add_trace(go.Bar(x=d_str, y=cd, name="Cash", marker_color='#4CAF50'))
-                        fig2.add_trace(go.Bar(x=d_str, y=ld, name="L.T. Debt", marker_color='#FF5252'))
-                        fig2.update_layout(title="Cash vs LT Debt", template="plotly_white", barmode='group', height=350)
-                        st.plotly_chart(fig2, use_container_width=True)
-                    except: st.info("Nema Cash podataka za graf.")
-
-            # TAB 2: TEHNIČKA ANALIZA
-            with tab_tech:
-                st.subheader("Tehnička Analiza (Zadnjih 2 god)")
-                if not history.empty:
-                    # Kalkulacije
-                    history['SMA_50'] = history['Close'].rolling(window=50).mean()
-                    history['SMA_200'] = history['Close'].rolling(window=200).mean()
-                    history['RSI'] = calculate_rsi(history['Close'])
-                    
-                    # Graf Cijene
-                    fig_tech = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-                    
-                    fig_tech.add_trace(go.Candlestick(x=history.index, open=history['Open'], high=history['High'], low=history['Low'], close=history['Close'], name='Cijena'), row=1, col=1)
-                    fig_tech.add_trace(go.Scatter(x=history.index, y=history['SMA_50'], line=dict(color='blue', width=1.5), name='SMA 50'), row=1, col=1)
-                    fig_tech.add_trace(go.Scatter(x=history.index, y=history['SMA_200'], line=dict(color='red', width=1.5), name='SMA 200'), row=1, col=1)
-                    
-                    # Graf RSI
-                    fig_tech.add_trace(go.Scatter(x=history.index, y=history['RSI'], line=dict(color='purple', width=1.5), name='RSI'), row=2, col=1)
-                    fig_tech.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-                    fig_tech.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-                    
-                    fig_tech.update_layout(xaxis_rangeslider_visible=False, height=550, template="plotly_dark")
-                    st.plotly_chart(fig_tech, use_container_width=True)
-                else:
-                    st.warning("Nema povijesnih podataka za tehničku analizu.")
-
-            # TAB 3: MAGIC FORMULA
-            with tab_dcf:
-                st.markdown("""<div class="magic-box">""", unsafe_allow_html=True)
-                st.subheader("✨ Magic Formula Calculation")
-                m1, m2, m3 = st.columns(3)
-                with m1: eps_m = st.number_input("EPS", value=info.get('trailingEps', 5.0))
-                with m2: gr_m = st.number_input("Rast %", value=15.0)
-                with m3: pe_m = st.number_input("PE", value=30.0)
-                
-                res = calculate_dcf(eps_m, gr_m, 15, pe_m) 
-                st.metric("Sticker Price (Fair Value)", f"${res/4:.2f}", f"MOS: ${res/8:.2f}")
-                st.markdown("</div>", unsafe_allow_html=True)
+            # GRAFOVI
+            st.subheader("📈 Financijski Grafovi")
+            dates = fin_ch.columns[::-1]
+            d_str = [str(d).split(' ')[0] for d in dates]
+            
+            cg1, cg2 = st.columns(2)
+            with cg1:
+                fig = go.Figure()
+                fig.add_trace(go.Bar(x=d_str, y=fin_ch.loc['Total Revenue'][dates], name="Rev", marker_color='#2196F3'))
+                fig.add_trace(go.Bar(x=d_str, y=fin_ch.loc['Net Income'][dates], name="Net Inc", marker_color='#4CAF50'))
+                fig.update_layout(title="Prihodi i Dobit", template="plotly_white", barmode='group', height=350)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # MAGIC FORMULA
+            st.markdown("---")
+            st.markdown("""<div class="magic-box">""", unsafe_allow_html=True)
+            st.subheader("✨ Magic Formula (Ručni Kalkulator)")
+            m1, m2, m3 = st.columns(3)
+            with m1: eps_m = st.number_input("EPS", value=info.get('trailingEps', 5.0))
+            with m2: gr_m = st.number_input("Rast %", value=15.0)
+            with m3: pe_m = st.number_input("PE", value=30.0)
+            
+            res = calculate_dcf(eps_m, gr_m, 15, pe_m) 
+            st.metric("Sticker Price (Fair Value)", f"${res/4:.2f}", f"MOS: ${res/8:.2f}")
+            st.markdown("</div>", unsafe_allow_html=True)
 
         else: st.error("Nema podataka.")
